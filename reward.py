@@ -1,0 +1,362 @@
+"""Cross-model perplexity (CME) reward.
+
+Two modes:
+- sequence-level: scalar reward per response (mean CE over response tokens)
+- token-level: per-token reward tensor aligned to generator token positions
+
+For token-level, we tokenize the response with both tokenizers and use character
+offsets to map verifier per-token CME back onto generator token positions.
+"""
+
+from __future__ import annotations
+
+from typing import List, Optional, Union
+
+import torch
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
+
+def _find_boxed_span(text: str) -> Optional[tuple]:
+    """Return (start, end) char offsets of the content inside the last \\boxed{...}.
+
+    Handles nested braces. Returns None if not found or unbalanced.
+    """
+    key = "\\boxed{"
+    idx = text.rfind(key)
+    if idx == -1:
+        return None
+    start = idx + len(key)
+    depth = 1
+    i = start
+    while i < len(text):
+        c = text[i]
+        if c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+            if depth == 0:
+                return (start, i)
+        i += 1
+    return None
+
+
+class CMERewardModel:
+    def __init__(
+        self,
+        verifier_name: str,
+        device: Optional[str] = None,
+        max_length: int = 2048,
+        dtype: torch.dtype = torch.bfloat16,
+    ):
+        self.max_length = max_length
+        self.device = device or ("cuda:1" if torch.cuda.device_count() > 1 else
+                                 ("cuda:0" if torch.cuda.is_available() else "cpu"))
+
+        self.tokenizer = AutoTokenizer.from_pretrained(verifier_name)
+        if self.tokenizer.pad_token is None:
+            self.tokenizer.pad_token = self.tokenizer.eos_token
+
+        self.model = AutoModelForCausalLM.from_pretrained(
+            verifier_name,
+            device_map={"": self.device},
+            torch_dtype=dtype,
+        )
+        self.model.eval()
+
+    @torch.no_grad()
+    def score(
+        self,
+        prompts: List[str],
+        responses: List[str],
+        token_level: bool = False,
+        gen_tokenizer=None,
+        answer_only: bool = False,
+        no_box_penalty: float = 5.0,
+    ) -> Union[List[float], List[torch.Tensor]]:
+        """Compute -CME reward.
+
+        sequence-level: returns List[float], mean CE per response (negated).
+        token-level: returns List[torch.Tensor], one -CME value per GENERATOR token.
+        """
+        rewards: List = []
+        for prompt, response in zip(prompts, responses):
+            if not response or not response.strip():
+                rewards.append(-5.0 if not token_level else torch.tensor([-5.0]))
+                continue
+
+            # Need offsets whenever we have to restrict to the answer span.
+            need_offsets = token_level or answer_only
+            prompt_enc = self.tokenizer(
+                prompt, add_special_tokens=True, return_tensors="pt",
+            )
+            response_enc = self.tokenizer(
+                response, add_special_tokens=False, return_tensors="pt",
+                return_offsets_mapping=need_offsets,
+            )
+            response_offsets = (
+                response_enc.offset_mapping[0].tolist() if need_offsets else None
+            )
+
+            answer_span = _find_boxed_span(response) if answer_only else None
+
+            prompt_ids = prompt_enc.input_ids[0]
+            response_ids = response_enc.input_ids[0]
+
+            if response_ids.numel() == 0:
+                rewards.append(-5.0 if not token_level else torch.tensor([-5.0]))
+                continue
+
+            full_ids = torch.cat([prompt_ids, response_ids], dim=0)
+            if full_ids.shape[0] > self.max_length:
+                overflow = full_ids.shape[0] - self.max_length
+                full_ids = full_ids[overflow:]
+                prompt_len = max(1, prompt_ids.shape[0] - overflow)
+                if token_level and response_offsets is not None:
+                    # Response tokens not dropped; overflow comes from prompt side.
+                    pass
+            else:
+                prompt_len = prompt_ids.shape[0]
+
+            input_ids = full_ids.unsqueeze(0).to(self.device)
+            labels = input_ids.clone()
+            labels[0, :prompt_len] = -100
+
+            outputs = self.model(input_ids=input_ids)
+            logits = outputs.logits[:, :-1, :]
+            shift_labels = labels[:, 1:]
+
+            if token_level:
+                per_tok_ce = torch.nn.functional.cross_entropy(
+                    logits.reshape(-1, logits.size(-1)),
+                    shift_labels.reshape(-1),
+                    ignore_index=-100,
+                    reduction="none",
+                ).reshape(shift_labels.shape)
+                # Grab only response positions (where labels != -100).
+                mask = shift_labels[0] != -100
+                verifier_token_ce = per_tok_ce[0][mask].cpu()  # [response_len]
+
+                if answer_only and answer_span is None:
+                    # No \boxed{} — assign constant large CE to every response token
+                    # so this completion gets a distinctly negative advantage after
+                    # per-position normalization across the group.
+                    verifier_token_ce = torch.full_like(
+                        verifier_token_ce, float(no_box_penalty)
+                    )
+                elif answer_span is not None:
+                    # Zero out CE for verifier tokens outside the \boxed{...} span.
+                    a, b = answer_span
+                    keep = torch.zeros_like(verifier_token_ce)
+                    v_offsets = response_offsets[: verifier_token_ce.numel()]
+                    for j, (va, vb) in enumerate(v_offsets):
+                        if va == vb:
+                            continue
+                        if vb > a and va < b:
+                            keep[j] = 1.0
+                    verifier_token_ce = verifier_token_ce * keep
+
+                # Align verifier tokens to generator tokens.
+                if gen_tokenizer is not None:
+                    gen_enc = gen_tokenizer(
+                        response, add_special_tokens=False, return_tensors="pt",
+                        return_offsets_mapping=True,
+                    )
+                    gen_offsets = gen_enc.offset_mapping[0].tolist()
+                    aligned = _align_ce_to_generator(
+                        verifier_token_ce, response_offsets, gen_offsets
+                    )
+                    rewards.append(-aligned)
+                else:
+                    rewards.append(-verifier_token_ce)
+            else:
+                per_tok_ce = torch.nn.functional.cross_entropy(
+                    logits.reshape(-1, logits.size(-1)),
+                    shift_labels.reshape(-1),
+                    ignore_index=-100,
+                    reduction="none",
+                ).reshape(shift_labels.shape)
+                ce_row = per_tok_ce[0]
+                label_mask = shift_labels[0] != -100
+
+                if answer_only and answer_span is None:
+                    rewards.append(-float(no_box_penalty))
+                    continue
+                if answer_span is not None:
+                    a, b = answer_span
+                    span_mask = torch.zeros_like(ce_row, dtype=torch.bool)
+                    # shift_labels drops position 0; response tokens start at index prompt_len - 1
+                    # in the shifted tensor. Walk response offsets and mark span overlaps.
+                    resp_start = prompt_len - 1
+                    v_offsets = response_offsets
+                    for j, (va, vb) in enumerate(v_offsets):
+                        pos = resp_start + j
+                        if pos < 0 or pos >= span_mask.shape[0]:
+                            continue
+                        if va == vb:
+                            continue
+                        if vb > a and va < b:
+                            span_mask[pos] = True
+                    final_mask = label_mask & span_mask
+                    if final_mask.any():
+                        loss = ce_row[final_mask].mean()
+                    else:
+                        # No boxed answer found; fall back to full response CE.
+                        loss = ce_row[label_mask].mean()
+                else:
+                    loss = ce_row[label_mask].mean()
+                rewards.append(-loss.item())
+
+        return rewards
+
+
+def _align_ce_to_generator(
+    verifier_ce: torch.Tensor,
+    verifier_offsets: list,
+    gen_offsets: list,
+) -> torch.Tensor:
+    """Map verifier per-token CE onto generator token positions via character overlap.
+
+    For each generator token covering [a, b], average verifier-token CE values for
+    verifier tokens with any overlap with [a, b]. Fallback to nearest if no overlap.
+    """
+    n_gen = len(gen_offsets)
+    out = torch.zeros(n_gen)
+    # Skip special tokens whose offsets are (0,0).
+    v_offsets = verifier_offsets[: len(verifier_ce)]
+    for i, (ga, gb) in enumerate(gen_offsets):
+        if ga == gb:  # empty gen token (special)
+            out[i] = 0.0
+            continue
+        overlapping = []
+        for j, (va, vb) in enumerate(v_offsets):
+            if va == vb:
+                continue
+            if vb > ga and va < gb:  # overlap
+                overlapping.append(verifier_ce[j].item())
+        if overlapping:
+            out[i] = sum(overlapping) / len(overlapping)
+        else:
+            # Find nearest verifier token by distance.
+            best_j, best_d = 0, float("inf")
+            mid = (ga + gb) / 2
+            for j, (va, vb) in enumerate(v_offsets):
+                if va == vb:
+                    continue
+                v_mid = (va + vb) / 2
+                d = abs(v_mid - mid)
+                if d < best_d:
+                    best_d = d
+                    best_j = j
+            out[i] = verifier_ce[best_j].item()
+    return out
+
+
+def build_cme_reward_fn(
+    reward_model: CMERewardModel,
+    token_level: bool = False,
+    gen_tokenizer=None,
+    answer_only: bool = False,
+    no_box_penalty: float = 5.0,
+):
+    """Return a TRL GRPO-compatible reward function.
+
+    In token-level mode, stashes per-token rewards in reward_fn.last_token_rewards
+    (list of tensors, one per completion) and returns mean reward per completion
+    as the scalar GRPO expects.
+    """
+
+    _call_count = [0]
+    mode = "token-level" if token_level else "sequence-level"
+    if answer_only:
+        mode += " (answer-only)"
+
+    def reward_fn(prompts, completions, **kwargs) -> List[float]:
+        prompt_texts: List[str] = []
+        completion_texts: List[str] = []
+        for p, c in zip(prompts, completions):
+            if isinstance(p, list):
+                p = "\n".join(m.get("content", "") for m in p)
+            if isinstance(c, list):
+                c = "\n".join(m.get("content", "") for m in c)
+            prompt_texts.append(p)
+            completion_texts.append(c)
+
+        debug_this = _call_count[0] < 3
+        if debug_this:
+            print(f"\n[DEBUG reward_fn call {_call_count[0]}] CME reward mode: {mode}")
+            print(f"  prompt type: {type(prompts[0])}, len: {len(prompts)}")
+            print(f"  completion[0][:150]: {repr(completion_texts[0][:150])}")
+            _call_count[0] += 1
+
+        # Always log extracted \boxed{} answers when answer_only is on — this is the
+        # signal actually driving the reward, and it's easy to miss collapse without it.
+        if answer_only:
+            extracted = []
+            for c in completion_texts:
+                span = _find_boxed_span(c)
+                extracted.append(c[span[0]:span[1]] if span else "<NO_BOX>")
+            print(f"  extracted \\boxed{{}}: {extracted}")
+
+        raw = reward_model.score(
+            prompt_texts, completion_texts,
+            token_level=token_level, gen_tokenizer=gen_tokenizer,
+            answer_only=answer_only, no_box_penalty=no_box_penalty,
+        )
+
+        if token_level:
+            token_rewards = []
+            scalar_rewards = []
+            keys = []
+            for c, r in zip(completion_texts, raw):
+                if isinstance(r, float):
+                    token_rewards.append(torch.tensor([r]))
+                    scalar_rewards.append(r)
+                else:
+                    token_rewards.append(r)
+                    if answer_only:
+                        # Average over non-zero (answer-span) positions only, so the
+                        # scalar isn't diluted by zeroed-out reasoning tokens.
+                        nonzero = r[r != 0]
+                        scalar_rewards.append(
+                            float(nonzero.mean().item()) if nonzero.numel() > 0 else 0.0
+                        )
+                    else:
+                        scalar_rewards.append(float(r.mean().item()))
+                keys.append(c)
+
+            # Pre-normalize per-position across the G responses so compute_loss
+            # just looks them up. Handles variable-length responses via right-padding.
+            max_len = max(t.numel() for t in token_rewards)
+            padded = torch.stack([
+                torch.nn.functional.pad(t, (0, max_len - t.numel()), value=float("nan"))
+                for t in token_rewards
+            ])  # [N, max_len] with NaN for missing positions
+            # per-position mean/std ignoring NaN
+            mask = ~torch.isnan(padded)
+            counts = mask.sum(dim=0, keepdim=True).clamp(min=1).float()
+            filled = torch.where(mask, padded, torch.zeros_like(padded))
+            mean = filled.sum(dim=0, keepdim=True) / counts
+            var = (torch.where(mask, (padded - mean) ** 2, torch.zeros_like(padded))).sum(dim=0, keepdim=True) / counts.clamp(min=1)
+            std = var.sqrt()
+            normalized = torch.where(mask, (padded - mean) / (std + 1e-4), torch.zeros_like(padded))
+
+            # unpack back to original lengths
+            normalized_rewards = []
+            for i, t in enumerate(token_rewards):
+                normalized_rewards.append(normalized[i, : t.numel()].clone())
+
+            reward_fn.last_token_rewards = normalized_rewards
+            reward_fn.completion_to_tokens = dict(zip(keys, normalized_rewards))
+            if _call_count[0] <= 3:
+                print(f"  scalar rewards (raw): {scalar_rewards}")
+                print(f"  token tensor shapes: {[t.shape for t in token_rewards]}")
+                print(f"  normalized tensor[0][:5]: {normalized_rewards[0][:5].tolist()}")
+            return scalar_rewards
+        else:
+            if _call_count[0] <= 3:
+                print(f"  rewards: {raw}")
+            return raw
+
+    reward_fn.last_token_rewards = None
+    reward_fn.token_level = token_level
+    return reward_fn
