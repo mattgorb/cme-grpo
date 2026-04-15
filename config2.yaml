@@ -54,11 +54,12 @@ reward:
   max_verifier_length: 3072
   token_level: true
   answer_only_cme: true
-
+  no_box_penalty: 2
+  
 eval:
   max_new_tokens: 3072
   temperature: 0.0
-  batch_size: 2
+  batch_size: 4
 
 wandb:
   project: cme-grpo
