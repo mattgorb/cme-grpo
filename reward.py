@@ -10,6 +10,7 @@ offsets to map verifier per-token CME back onto generator token positions.
 
 from __future__ import annotations
 
+import math
 from typing import List, Optional, Union
 
 import torch
@@ -72,12 +73,16 @@ class CMERewardModel:
         gen_tokenizer=None,
         answer_only: bool = False,
         no_box_penalty: float = 5.0,
+        reward_metric: str = "entropy",
     ) -> Union[List[float], List[torch.Tensor]]:
-        """Compute -CME reward.
+        """Compute the CME reward.
 
-        sequence-level: returns List[float], mean CE per response (negated).
-        token-level: returns List[torch.Tensor], one -CME value per GENERATOR token.
+        reward_metric: "entropy" (default) uses CE (log-space); "perplexity" uses
+        exp(CE). Both are negated so lower verifier-surprise => higher reward.
         """
+        if reward_metric not in ("entropy", "perplexity"):
+            raise ValueError(f"reward_metric must be 'entropy' or 'perplexity', got {reward_metric!r}")
+        use_ppl = reward_metric == "perplexity"
         rewards: List = []
         for prompt, response in zip(prompts, responses):
             if not response or not response.strip():
@@ -165,9 +170,12 @@ class CMERewardModel:
                     aligned = _align_ce_to_generator(
                         verifier_token_ce, response_offsets, gen_offsets
                     )
+                    if use_ppl:
+                        aligned = torch.exp(aligned)
                     rewards.append(-aligned)
                 else:
-                    rewards.append(-verifier_token_ce)
+                    tok_rw = verifier_token_ce.exp() if use_ppl else verifier_token_ce
+                    rewards.append(-tok_rw)
             else:
                 per_tok_ce = torch.nn.functional.cross_entropy(
                     logits.reshape(-1, logits.size(-1)),
@@ -179,7 +187,8 @@ class CMERewardModel:
                 label_mask = shift_labels[0] != -100
 
                 if answer_only and answer_span is None:
-                    rewards.append(-float(no_box_penalty))
+                    penalty = math.exp(float(no_box_penalty)) if use_ppl else float(no_box_penalty)
+                    rewards.append(-penalty)
                     continue
                 if answer_span is not None:
                     a, b = answer_span
@@ -204,7 +213,8 @@ class CMERewardModel:
                         loss = ce_row[label_mask].mean()
                 else:
                     loss = ce_row[label_mask].mean()
-                rewards.append(-loss.item())
+                val = math.exp(loss.item()) if use_ppl else loss.item()
+                rewards.append(-val)
 
         return rewards
 
@@ -257,6 +267,7 @@ def build_cme_reward_fn(
     gen_tokenizer=None,
     answer_only: bool = False,
     no_box_penalty: float = 5.0,
+    reward_metric: str = "entropy",
 ):
     """Return a TRL GRPO-compatible reward function.
 
@@ -301,6 +312,7 @@ def build_cme_reward_fn(
             prompt_texts, completion_texts,
             token_level=token_level, gen_tokenizer=gen_tokenizer,
             answer_only=answer_only, no_box_penalty=no_box_penalty,
+            reward_metric=reward_metric,
         )
 
         if token_level:

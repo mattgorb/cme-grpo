@@ -139,12 +139,14 @@ def main():
     token_level = cfg.get("reward", {}).get("token_level", False)
     answer_only = cfg.get("reward", {}).get("answer_only_cme", False)
     no_box_penalty = cfg.get("reward", {}).get("no_box_penalty", 5.0)
+    reward_metric = cfg.get("reward", {}).get("reward_metric", "entropy")
     reward_fn = build_cme_reward_fn(
         reward_model,
         token_level=token_level,
         gen_tokenizer=tokenizer if token_level else None,
         answer_only=answer_only,
         no_box_penalty=no_box_penalty,
+        reward_metric=reward_metric,
     )
 
     train_ds = build_train_dataset(cfg)

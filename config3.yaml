@@ -35,7 +35,7 @@ training:
   learning_rate: 3.0e-7
   max_grad_norm: 10.0
   kl_coef: 0 # just to log with ref model
-  per_device_train_batch_size: 1g
+  per_device_train_batch_size: 1
   gradient_accumulation_steps: 8
   num_train_epochs: 1
   max_steps: 5000
@@ -44,7 +44,7 @@ training:
   save_steps: 100
   eval_steps: 100
   skip_baseline_eval: true
-  output_dir: ./outputs/cme-grpo-qwen1.5b
+  output_dir: ./outputs/cme-grpo-qwen1.5b-ppl
   bf16: true
   seed: 42
 
@@ -52,7 +52,8 @@ reward:
   max_verifier_length: 3072
   token_level: true
   answer_only_cme: true
-  no_box_penalty: 2
+  reward_metric: perplexity
+  no_box_penalty: 1
 
 eval:
   max_new_tokens: 3072
@@ -61,4 +62,4 @@ eval:
 
 wandb:
   project: cme-grpo
-  run_name: config1
+  run_name: config3-ppl
