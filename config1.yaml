@@ -38,11 +38,11 @@ training:
   per_device_train_batch_size: 1
   gradient_accumulation_steps: 8
   num_train_epochs: 1
-  max_steps: 1000
+  max_steps: 5000
   warmup_steps: 20
   logging_steps: 1
   save_steps: 100
-  eval_steps: 100
+  eval_steps: 20
   skip_baseline_eval: true
   output_dir: ./outputs/cme-grpo-qwen1.5b
   bf16: true
@@ -60,4 +60,4 @@ eval:
 
 wandb:
   project: cme-grpo
-  run_name: qwen1.5b-gen_qwen7b-ver
+  run_name: config1
