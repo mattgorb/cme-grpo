@@ -46,7 +46,7 @@ training:
   save_steps: 100
   eval_steps: 100
   skip_baseline_eval: true
-  output_dir: ./outputs/cme-grpo-qwen1.5b
+  output_dir: ./outputs/cme-grpo-llama1b
   bf16: true
   seed: 42
 
