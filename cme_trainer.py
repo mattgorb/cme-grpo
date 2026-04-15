@@ -103,13 +103,49 @@ class CMETokenLevelGRPOTrainer(GRPOTrainer):
         log_probs = torch.log_softmax(comp_logits, dim=-1)
         per_token_logp = log_probs.gather(-1, comp_targets.unsqueeze(-1)).squeeze(-1)
 
+        # Policy entropy per token: -sum p * log p over vocab.
+        per_token_entropy = -(log_probs.exp() * log_probs).sum(dim=-1)
+
         mask = completion_mask.float()
         T = min(per_token_logp.shape[1], token_adv.shape[1], mask.shape[1])
         per_token_logp = per_token_logp[:, :T]
+        per_token_entropy = per_token_entropy[:, :T]
         adv = token_adv[:, :T]
         mask = mask[:, :T]
 
         active = ((adv != 0).float() * mask)
         denom = active.sum().clamp(min=1.0)
         loss = -(adv * per_token_logp * mask).sum() / denom
+
+        # Entropy over completion tokens (masked).
+        mask_sum = mask.sum().clamp(min=1.0)
+        mean_entropy = (per_token_entropy * mask).sum() / mask_sum
+
+        # KL(policy || ref_model) if TRL set up a reference model.
+        mean_kl = None
+        ref_model = getattr(self, "ref_model", None)
+        if ref_model is not None:
+            with torch.no_grad():
+                ref_outputs = ref_model(input_ids=full_ids, attention_mask=attn_mask)
+                ref_log_probs = torch.log_softmax(
+                    ref_outputs.logits[:, :-1, :][:, P - 1 :, :], dim=-1
+                )[:, :T, :]
+            # KL per position: sum p_policy * (log p_policy - log p_ref)
+            policy_probs = log_probs[:, :T, :].exp()
+            per_tok_kl = (policy_probs * (log_probs[:, :T, :] - ref_log_probs)).sum(dim=-1)
+            mean_kl = (per_tok_kl * mask).sum() / mask_sum
+
+        log_dict = {
+            "policy_entropy": float(mean_entropy.detach().item()),
+            "advantage_mean": float((adv * mask).sum().item() / mask_sum.item()),
+            "advantage_abs_mean": float((adv.abs() * mask).sum().item() / mask_sum.item()),
+            "active_frac": float(active.sum().item() / mask_sum.item()),
+        }
+        if mean_kl is not None:
+            log_dict["kl_ref"] = float(mean_kl.detach().item())
+        try:
+            self.log(log_dict)
+        except Exception:
+            pass
+
         return loss
