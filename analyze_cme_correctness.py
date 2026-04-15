@@ -24,6 +24,7 @@ from typing import List, Optional, Tuple
 
 import torch
 import yaml
+import wandb
 from datasets import load_dataset
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
@@ -150,9 +151,34 @@ def main():
     ap.add_argument("--temperature", type=float, default=1.0)
     ap.add_argument("--max-new-tokens", type=int, default=1024)
     ap.add_argument("--output", default="cme_correctness.csv")
+    ap.add_argument("--wandb-project", default="cme-grpo-analysis")
+    ap.add_argument("--wandb-run-name", default=None)
+    ap.add_argument("--log-file", default="analyze.log",
+                    help="Local log file uploaded to W&B as an artifact at end.")
     args = ap.parse_args()
 
     cfg = load_cfg(args.config)
+    wandb.init(
+        project=args.wandb_project,
+        name=args.wandb_run_name,
+        config={
+            **{f"cfg_{k}": v for k, v in cfg.items() if not isinstance(v, list)},
+            "generator": cfg["model"]["generator"],
+            "verifier": cfg["model"]["verifier"],
+            "benchmark": args.benchmark,
+            "max_samples": args.max_samples,
+            "num_generations": args.num_generations,
+            "temperature": args.temperature,
+            "max_new_tokens": args.max_new_tokens,
+        },
+    )
+    # Live-sync the log file so you can watch it in W&B during the run.
+    # wandb.save resolves relative paths against the current working directory.
+    import os as _os
+    log_path = _os.path.abspath(args.log_file)
+    # Touch the file so wandb has something to watch even before tee writes.
+    open(log_path, "a").close()
+    wandb.save(log_path, base_path=_os.path.dirname(log_path), policy="live")
     bench = next(b for b in cfg["benchmarks"] if b["name"] == args.benchmark)
 
     gen_device = "cuda:0" if torch.cuda.is_available() else "cpu"
@@ -274,6 +300,13 @@ def main():
         n_i = sum(1 for r in rows if r["status"] == "incorrect")
         n_n = sum(1 for r in rows if r["status"] == "none")
         print(f"  [running after problem {i+1}] correct={n_c} incorrect={n_i} none={n_n}")
+        wb_payload = {
+            "problem": i + 1,
+            "running/accuracy": n_c / len(rows),
+            "running/n_correct": n_c,
+            "running/n_incorrect": n_i,
+            "running/n_none": n_n,
+        }
         for key in metric_keys:
             mc, cc = _mean(key, "correct")
             mi, ci = _mean(key, "incorrect")
@@ -286,6 +319,13 @@ def main():
                 f"incorrect={_fmt(mi)} (n={ci})  "
                 f"none={_fmt(mn)} (n={cn})"
             )
+            if not math.isnan(mc):
+                wb_payload[f"running/{key}/correct"] = mc
+            if not math.isnan(mi):
+                wb_payload[f"running/{key}/incorrect"] = mi
+            if not math.isnan(mn):
+                wb_payload[f"running/{key}/none"] = mn
+        wandb.log(wb_payload, step=i + 1)
 
     if not rows:
         print("No rows produced.")
@@ -316,14 +356,51 @@ def main():
         )
 
     print()
-    summarize("PPL-gen full   ", "ppl_gen_full")
-    summarize("PPL-gen answer ", "ppl_gen_answer")
-    summarize("PPL-ver full   ", "ppl_ver_full")
-    summarize("PPL-ver answer ", "ppl_ver_answer")
-    summarize("H-gen full     ", "entropy_gen_full")
-    summarize("H-gen answer   ", "entropy_gen_answer")
-    summarize("H-ver full     ", "entropy_ver_full")
-    summarize("H-ver answer   ", "entropy_ver_answer")
+    final_metrics = {"final/accuracy": n_correct / total, "final/total": total}
+    for label, key in [
+        ("PPL-gen full   ", "ppl_gen_full"),
+        ("PPL-gen answer ", "ppl_gen_answer"),
+        ("PPL-ver full   ", "ppl_ver_full"),
+        ("PPL-ver answer ", "ppl_ver_answer"),
+        ("H-gen full     ", "entropy_gen_full"),
+        ("H-gen answer   ", "entropy_gen_answer"),
+        ("H-ver full     ", "entropy_ver_full"),
+        ("H-ver answer   ", "entropy_ver_answer"),
+    ]:
+        summarize(label, key)
+        cor = [r[key] for r in rows if r["correct"] and not math.isnan(r[key])]
+        wro = [r[key] for r in rows if not r["correct"] and not math.isnan(r[key])]
+        au = auroc([r[key] for r in rows], [1 - r["correct"] for r in rows])
+        if cor:
+            final_metrics[f"final/{key}/correct_mean"] = statistics.mean(cor)
+        if wro:
+            final_metrics[f"final/{key}/wrong_mean"] = statistics.mean(wro)
+        if au is not None:
+            final_metrics[f"final/{key}/auroc_wrong_gt_correct"] = au
+
+    # Per-bucket final means (3-way split).
+    for key in [
+        "ppl_gen_full", "ppl_gen_answer", "ppl_ver_full", "ppl_ver_answer",
+        "entropy_gen_full", "entropy_gen_answer", "entropy_ver_full", "entropy_ver_answer",
+    ]:
+        for label in ("correct", "incorrect", "none"):
+            vals = [r[key] for r in rows if r["status"] == label and not math.isnan(r[key])]
+            if vals:
+                final_metrics[f"final/{key}/{label}_mean"] = sum(vals) / len(vals)
+                final_metrics[f"final/{key}/{label}_n"] = len(vals)
+
+    wandb.log(final_metrics)
+
+    # Full table of every generation.
+    table_cols = list(rows[0].keys())
+    table = wandb.Table(columns=table_cols)
+    for r in rows:
+        table.add_data(*[r[c] for c in table_cols])
+    wandb.log({"samples": table})
+
+    # CSV uploaded once at end; log file is already live-syncing from the start.
+    wandb.save(_os.path.abspath(args.output), policy="now")
+    wandb.finish()
 
 
 if __name__ == "__main__":
