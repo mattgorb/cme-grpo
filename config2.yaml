@@ -30,7 +30,7 @@ benchmarks:
 generation:
   num_generations: 8
   temperature: 1.0
-  max_new_tokens: 3072
+  max_new_tokens: 2048
   top_p: 1.0
 
 training:
@@ -43,8 +43,8 @@ training:
   max_steps: 5000
   warmup_steps: 20
   logging_steps: 1
-  save_steps: 100
-  eval_steps: 100
+  save_steps: 400
+  eval_steps: 200
   skip_baseline_eval: true
   output_dir: ./outputs/cme-grpo-llama1b
   bf16: true
@@ -59,8 +59,8 @@ reward:
 eval:
   max_new_tokens: 3072
   temperature: 0.0
-  batch_size: 4
+  batch_size: 2
 
 wandb:
   project: cme-grpo
-  run_name: config1
+  run_name: config2
