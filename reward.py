@@ -61,6 +61,7 @@ class CMERewardModel:
             verifier_name,
             device_map={"": self.device},
             torch_dtype=dtype,
+            attn_implementation="flash_attention_2",
         )
         self.model.eval()
 

@@ -36,7 +36,7 @@ generation:
 training:
   learning_rate: 1.0e-6
   max_grad_norm: 2.0
-  kl_coef: 1e-4
+  kl_coef: 0 #1e-4
   per_device_train_batch_size: 1
   gradient_accumulation_steps: 8
   num_train_epochs: 1
