@@ -43,7 +43,7 @@ training:
   max_steps: 5000
   warmup_steps: 20
   logging_steps: 1
-  save_steps: 400
+  save_steps: 200
   eval_steps: 200
   skip_baseline_eval: true
   output_dir: ./outputs/cme-grpo-llama1b
