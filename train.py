@@ -48,6 +48,8 @@ class PeriodicEvalCallback(TrainerCallback):
         self.cfg = cfg
         self.eval_steps = eval_steps
         self.baseline_samples = baseline_samples or []  # list of (problem, gold, text)
+        self.best_accuracy = -1.0
+        self.best_dir = os.path.join(cfg["training"]["output_dir"], "checkpoint-best")
 
     def _generate_sample(self, model, tokenizer, problem, device, max_new_tokens=1024):
         from eval import format_prompt
