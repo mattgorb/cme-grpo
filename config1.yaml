@@ -42,6 +42,7 @@ training:
   warmup_steps: 20
   logging_steps: 1
   save_steps: 100
+  save_total_limit: 3
   eval_steps: 100
   skip_baseline_eval: true
   output_dir: ./outputs/cme-grpo-qwen1.5b
