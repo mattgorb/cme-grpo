@@ -88,6 +88,20 @@ class PeriodicEvalCallback(TrainerCallback):
                     },
                 )
 
+            # Save best checkpoint based on mean accuracy across benchmarks.
+            mean_acc = sum(r["pass@1"] for r in results.values()) / max(len(results), 1)
+            if mean_acc > self.best_accuracy:
+                self.best_accuracy = mean_acc
+                print(f"[step {state.global_step}] new best accuracy: {mean_acc:.4f} — saving to {self.best_dir}")
+                import shutil
+                if os.path.exists(self.best_dir):
+                    shutil.rmtree(self.best_dir)
+                model.save_pretrained(self.best_dir)
+                if tokenizer is not None:
+                    tokenizer.save_pretrained(self.best_dir)
+                with open(os.path.join(self.best_dir, "best_info.txt"), "w") as f:
+                    f.write(f"step={state.global_step}\nmean_accuracy={mean_acc:.4f}\n")
+
             # Side-by-side sample generations.
             if self.baseline_samples:
                 print(f"\n{'=' * 70}")
@@ -190,6 +204,7 @@ def main():
         beta=cfg["training"]["kl_coef"],
         max_grad_norm=cfg["training"].get("max_grad_norm", 1.0),
         gradient_checkpointing=True,
+        save_total_limit=1,
         report_to=["wandb"],
     )
 
