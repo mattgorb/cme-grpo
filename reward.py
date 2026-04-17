@@ -297,6 +297,7 @@ def build_cme_reward_fn(
             print(f"\n[DEBUG reward_fn call {_call_count[0]}] CME reward mode: {mode}")
             print(f"  prompt type: {type(prompts[0])}, len: {len(prompts)}")
             print(f"  completion[0][:150]: {repr(completion_texts[0][:150])}")
+            print(f"  kwargs keys: {list(kwargs.keys())}")
             _call_count[0] += 1
 
         # Always log extracted \boxed{} answers when answer_only is on — this is the

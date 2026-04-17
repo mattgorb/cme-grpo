@@ -30,7 +30,7 @@ benchmarks:
 generation:
   num_generations: 8
   temperature: 1.0
-  max_new_tokens: 2048
+  max_new_tokens: 3072
   top_p: 1.0
 
 training:
@@ -51,13 +51,13 @@ training:
   seed: 42
 
 reward:
-  max_verifier_length: 2048
+  max_verifier_length: 3072
   token_level: true
   answer_only_cme: true
   no_box_penalty: 2
 
 eval:
-  max_new_tokens: 2048
+  max_new_tokens: 3072
   temperature: 0.0
   batch_size: 2
 
