@@ -32,12 +32,15 @@ def load_config(path: str = "config.yaml") -> dict:
 
 
 def build_train_dataset(cfg: dict):
+    from eval import extract_boxed
     ds = load_dataset(cfg["data"]["train_dataset"], split="train")
 
     def _map(ex):
-        return {"prompt": PROMPT_TEMPLATE.format(problem=ex["problem"])}
+        gold = extract_boxed(ex.get("solution", "")) or ""
+        return {"prompt": PROMPT_TEMPLATE.format(problem=ex["problem"]), "gold_answer": gold}
 
-    return ds.map(_map, remove_columns=[c for c in ds.column_names if c != "problem"])
+    keep = {"problem", "gold_answer"}
+    return ds.map(_map, remove_columns=[c for c in ds.column_names if c not in keep])
 
 
 class PeriodicEvalCallback(TrainerCallback):
