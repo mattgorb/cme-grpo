@@ -1,0 +1,44 @@
+
+# Toy CME-GRPO config — runs locally on MacBook (M4, 16GB)
+# Generator: tiny_starcoder_py (CE=1.83, PPL=8.4)
+# Verifier: codegen-350M-mono (CE=1.35, PPL=4.6, judge winrate=56%)
+model:
+  generator: bigcode/tiny_starcoder_py
+  verifier: Salesforce/codegen-350M-mono
+
+data:
+  train_dataset: google-research-datasets/mbpp  # MBPP train split
+
+generation:
+  num_generations: 4
+  temperature: 0.8
+  max_new_tokens: 256
+  top_p: 1.0
+  repetition_penalty: 1.3
+
+training:
+  learning_rate: 5.0e-6
+  max_grad_norm: 1.0
+  kl_coef: 0  # tracked separately in KL callback; beta=0 in trainer
+  per_device_train_batch_size: 2
+  gradient_accumulation_steps: 4
+  num_train_epochs: 1
+  max_steps: 500
+  warmup_steps: 10
+  logging_steps: 5
+  save_steps: 50
+  save_total_limit: 2
+  eval_steps: 50
+  output_dir: ./toy/outputs
+  bf16: false
+  seed: 42
+
+reward:
+  max_verifier_length: 768
+  token_level: false
+  answer_only_cme: false
+  no_box_penalty: 5.0
+
+wandb:
+  project: cme-grpo-toy
+  run_name: toy-code
