@@ -126,17 +126,26 @@ TOY_PROMPTS = [
 
 
 def diversity_reward_fn(prompts, completions, **kwargs):
-    """Penalize repetitive completions. Returns 0 for diverse text, negative for repetition."""
+    """Penalize repetitive completions. Catches both token-level and character-level repetition."""
     rewards = []
     for c in completions:
         text = c if isinstance(c, str) else "\n".join(m.get("content", "") for m in c)
-        tokens = text.split()
-        if len(tokens) == 0:
-            rewards.append(-2.0)
+        if len(text) == 0:
+            rewards.append(-5.0)
             continue
-        unique_ratio = len(set(tokens)) / len(tokens)
-        # 1.0 = fully unique, 0.0 = all repeated. Map to reward: diverse=0, repetitive=-2
-        rewards.append(-2.0 * (1.0 - unique_ratio))
+
+        # Token-level: unique ratio
+        tokens = text.split()
+        token_ratio = len(set(tokens)) / max(len(tokens), 1)
+
+        # Character-level: catches digit-string exploit (e.g., "111111...")
+        chars = list(text)
+        char_ratio = len(set(chars)) / max(len(chars), 1)
+
+        # Worst of both — scale to match CME reward range (-1 to -4)
+        worst_ratio = min(token_ratio, char_ratio)
+        rewards.append(-5.0 * (1.0 - worst_ratio))
+    return rewards
     return rewards
 
 

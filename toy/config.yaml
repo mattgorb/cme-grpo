@@ -17,7 +17,7 @@ generation:
   repetition_penalty: 1.3
 
 training:
-  learning_rate: 5.0e-6
+  learning_rate: 1.0e-6
   max_grad_norm: 1.0
   kl_coef: 0  # tracked separately in KL callback; beta=0 in trainer
   per_device_train_batch_size: 2
