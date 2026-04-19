@@ -53,7 +53,7 @@ training:
 
 reward:
   max_verifier_length: 3072
-  token_level: true
+  token_level: false
   answer_only_cme: true
   no_box_penalty: 2
 
