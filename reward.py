@@ -315,6 +315,8 @@ def build_cme_reward_fn(
                 ans = f"{ans} {tag}"
             extracted.append(ans)
         print(f"  extracted \\boxed{{}}: {extracted}")
+        # Print first completion's full text for reasoning inspection.
+        print(f"  completion[0] ({len(completion_texts[0])} chars): {completion_texts[0][:500]}")
 
         raw = reward_model.score(
             prompt_texts, completion_texts,

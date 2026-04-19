@@ -1,7 +1,7 @@
 
 #
 model:
-  generator: meta-llama/Llama-3.2-1B
+  generator: Qwen/Qwen2.5-Math-1.5B
   #verifier: Qwen/Qwen2.5-Math-7B
   verifier: Qwen/Qwen2.5-Math-7B-Instruct
 
@@ -53,9 +53,9 @@ training:
 
 reward:
   max_verifier_length: 3072
-  token_level: false
+  token_level: true
   answer_only_cme: true
-  no_box_penalty: 10
+  no_box_penalty: 5
 
 eval:
   max_new_tokens: 3072
