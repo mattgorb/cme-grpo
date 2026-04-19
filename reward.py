@@ -303,6 +303,8 @@ def build_cme_reward_fn(
         # Always log extracted \boxed{} answers and gold for debugging.
         from eval import is_correct
         gold_answers = kwargs.get("gold_answer", [None] * len(completion_texts))
+        unique_golds = list(dict.fromkeys(g for g in gold_answers if g))
+        print(f"  gold: {unique_golds}")
         extracted = []
         for c, gold in zip(completion_texts, gold_answers):
             span = _find_boxed_span(c)
@@ -310,7 +312,7 @@ def build_cme_reward_fn(
             if gold:
                 pred = ans if ans != "<NO_BOX>" else None
                 tag = "✓" if is_correct(pred, gold) else "✗"
-                ans = f"{ans} {tag} (gold={gold})"
+                ans = f"{ans} {tag}"
             extracted.append(ans)
         print(f"  extracted \\boxed{{}}: {extracted}")
 
