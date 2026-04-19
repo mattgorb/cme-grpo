@@ -300,21 +300,19 @@ def build_cme_reward_fn(
             print(f"  kwargs keys: {list(kwargs.keys())}")
             _call_count[0] += 1
 
-        # Always log extracted \boxed{} answers when answer_only is on — this is the
-        # signal actually driving the reward, and it's easy to miss collapse without it.
-        if answer_only:
-            from eval import is_correct
-            gold_answers = kwargs.get("gold_answer", [None] * len(completion_texts))
-            extracted = []
-            for c, gold in zip(completion_texts, gold_answers):
-                span = _find_boxed_span(c)
-                ans = c[span[0]:span[1]] if span else "<NO_BOX>"
-                if gold:
-                    pred = ans if ans != "<NO_BOX>" else None
-                    tag = "✓" if is_correct(pred, gold) else "✗"
-                    ans = f"{ans} {tag}"
-                extracted.append(ans)
-            print(f"  extracted \\boxed{{}}: {extracted}")
+        # Always log extracted \boxed{} answers and gold for debugging.
+        from eval import is_correct
+        gold_answers = kwargs.get("gold_answer", [None] * len(completion_texts))
+        extracted = []
+        for c, gold in zip(completion_texts, gold_answers):
+            span = _find_boxed_span(c)
+            ans = c[span[0]:span[1]] if span else "<NO_BOX>"
+            if gold:
+                pred = ans if ans != "<NO_BOX>" else None
+                tag = "✓" if is_correct(pred, gold) else "✗"
+                ans = f"{ans} {tag} (gold={gold})"
+            extracted.append(ans)
+        print(f"  extracted \\boxed{{}}: {extracted}")
 
         raw = reward_model.score(
             prompt_texts, completion_texts,
