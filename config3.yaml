@@ -34,10 +34,10 @@ generation:
   top_p: 1.0
 
 training:
-  learning_rate: 1.0e-6
+  learning_rate: 5.0e-6
   max_grad_norm: 1.0
-  kl_coef: 0.0001
-  per_device_train_batch_size: 4
+  kl_coef: 0 #0.0001
+  per_device_train_batch_size: 1
   gradient_accumulation_steps: 8
   num_train_epochs: 1
   max_steps: 5000
@@ -47,20 +47,20 @@ training:
   save_total_limit: 3
   eval_steps: 200
   skip_baseline_eval: true
-  output_dir: ./outputs/cme-grpo-llama1b
+  output_dir: ./outputs/cme-grpo-config3
   bf16: true
   seed: 42
 
 reward:
   max_verifier_length: 3072
-  token_level: true
-  answer_only_cme: true
-  no_box_penalty: 2
+  token_level: false
+  answer_only_cme: false
+  no_box_penalty: 5
 
 eval:
   max_new_tokens: 3072
   temperature: 0.0
-  batch_size: 4
+  batch_size: 2
 
 wandb:
   project: cme-grpo
