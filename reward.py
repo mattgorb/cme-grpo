@@ -213,6 +213,12 @@ class CMERewardModel:
                         loss = ce_row[label_mask].mean()
                 else:
                     loss = ce_row[label_mask].mean()
+                # When scoring the full response (answer_only=False), add an additive
+                # penalty if the response has no \boxed{}. Without this the CME signal
+                # doesn't consistently reward formatting, so a base model can drift
+                # into producing coherent math without ever boxing the answer.
+                if not answer_only and _find_boxed_span(response) is None:
+                    loss = loss + float(no_box_penalty)
                 val = math.exp(loss.item()) if use_ppl else loss.item()
                 rewards.append(-val)
 
