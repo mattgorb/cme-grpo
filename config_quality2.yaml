@@ -7,7 +7,7 @@
 
 model:
   generator: meta-llama/Llama-3.2-1B
-  verifier: google/gemma-4-E4B-it
+  verifier: google/gemma-3n-E4B-it
   # For three-way LLM judge comparison
   base: meta-llama/Llama-3.2-1B
   instruct: meta-llama/Llama-3.2-1B-Instruct
@@ -55,5 +55,5 @@ eval:
   judge_num_samples: 50
 
 wandb:
-  project: cme-grpo-quality
+  project: cme-grpo
   run_name: quality-llama1b
