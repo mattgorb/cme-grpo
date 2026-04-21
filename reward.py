@@ -282,7 +282,6 @@ def build_cme_reward_fn(
     as the scalar GRPO expects.
     """
 
-    _call_count = [0]
     mode = "token-level" if token_level else "sequence-level"
     if answer_only:
         mode += " (answer-only)"
@@ -298,19 +297,10 @@ def build_cme_reward_fn(
             prompt_texts.append(p)
             completion_texts.append(c)
 
-        debug_this = _call_count[0] < 3
-        if debug_this:
-            print(f"\n[DEBUG reward_fn call {_call_count[0]}] CME reward mode: {mode}")
-            print(f"  prompt type: {type(prompts[0])}, len: {len(prompts)}")
-            print(f"  completion[0][:150]: {repr(completion_texts[0][:150])}")
-            print(f"  kwargs keys: {list(kwargs.keys())}")
-            _call_count[0] += 1
-
-        # Always log extracted \boxed{} answers and gold for debugging.
         from eval import is_correct
         gold_answers = kwargs.get("gold_answer", [None] * len(completion_texts))
         unique_golds = list(dict.fromkeys(g for g in gold_answers if g))
-        # print(f"  gold: {unique_golds}")
+        print(f"  gold: {unique_golds}")
         extracted = []
         for c, gold in zip(completion_texts, gold_answers):
             span = _find_boxed_span(c)
@@ -320,9 +310,7 @@ def build_cme_reward_fn(
                 tag = "✓" if is_correct(pred, gold) else "✗"
                 ans = f"{ans} {tag}"
             extracted.append(ans)
-        # print(f"  extracted \\boxed{{}}: {extracted}")
-        # Print first completion's full text for reasoning inspection.
-        # print(f"  completion[0] ({len(completion_texts[0])} chars): {completion_texts[0][:500]}")
+        print(f"  extracted \\boxed{{}}: {extracted}")
 
         raw = reward_model.score(
             prompt_texts, completion_texts,
@@ -375,14 +363,10 @@ def build_cme_reward_fn(
 
             reward_fn.last_token_rewards = normalized_rewards
             reward_fn.completion_to_tokens = dict(zip(keys, normalized_rewards))
-            if _call_count[0] <= 3:
-                print(f"  scalar rewards (raw): {scalar_rewards}")
-                print(f"  token tensor shapes: {[t.shape for t in token_rewards]}")
-                print(f"  normalized tensor[0][:5]: {normalized_rewards[0][:5].tolist()}")
+            print(f"  rewards: {scalar_rewards}")
             return scalar_rewards
         else:
-            # if _call_count[0] <= 3:
-            #     print(f"  rewards: {raw}")
+            print(f"  rewards: {raw}")
             return raw
 
     reward_fn.last_token_rewards = None
