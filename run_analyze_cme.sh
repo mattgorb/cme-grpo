@@ -66,13 +66,13 @@ run_analyze "llama-3.2-1b" "meta-llama/Llama-3.2-1B" \
 
 
 # ───────── Llama-3.2-1B-Instruct ─────────
-run_analyze "llama-3.2-1b" "meta-llama/Llama-3.2-1B-Instruct" \
+run_analyze "llama-3.2-1b-Instruct" "meta-llama/Llama-3.2-1B-Instruct" \
     "math500" "HuggingFaceH4/MATH-500" "test" "problem" "answer" 100
 
-run_analyze "llama-3.2-1b" "meta-llama/Llama-3.2-1B-Instruct" \
+run_analyze "llama-3.2-1b-Instruct" "meta-llama/Llama-3.2-1B-Instruct" \
     "amc23" "math-ai/amc23" "test" "question" "answer" 40
 
-run_analyze "llama-3.2-1b" "meta-llama/Llama-3.2-1B-Instruct" \
+run_analyze "llama-3.2-1b-Instruct" "meta-llama/Llama-3.2-1B-Instruct" \
     "aime24" "Maxwell-Jia/AIME_2024" "train" "Problem" "Answer" 30
 
 
