@@ -144,7 +144,7 @@ def auroc(scores: List[float], labels: List[int]) -> Optional[float]:
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--config", default="config1.yaml")
+    ap.add_argument("--config", default=None, help="Optional YAML config; CLI flags override its values")
     ap.add_argument("--benchmark", default="math500")
     ap.add_argument("--max-samples", type=int, default=100)
     ap.add_argument("--num-generations", type=int, default=8)
@@ -155,17 +155,63 @@ def main():
     ap.add_argument("--wandb-run-name", default=None)
     ap.add_argument("--log-file", default="analyze.log",
                     help="Local log file uploaded to W&B as an artifact at end.")
+    # CLI overrides for model/benchmark/reward. If --config is omitted, these
+    # are required; if provided, they override config values.
+    ap.add_argument("--generator", default=None, help="Override cfg.model.generator")
+    ap.add_argument("--verifier", default=None, help="Override cfg.model.verifier")
+    ap.add_argument("--max-length", type=int, default=None, help="Override cfg.reward.max_verifier_length")
+    ap.add_argument("--benchmark-dataset", default=None, help="HF dataset name (overrides config)")
+    ap.add_argument("--benchmark-split", default="test", help="Dataset split")
+    ap.add_argument("--benchmark-problem-key", default="problem", help="Field name for problem text")
+    ap.add_argument("--benchmark-answer-key", default="answer", help="Field name for gold answer")
     args = ap.parse_args()
 
-    cfg = load_cfg(args.config)
+    cfg = load_cfg(args.config) if args.config else {}
+
+    # Resolve final values: CLI flag wins, else config, else error.
+    def _resolve(cli_val, cfg_path, required=True, default=None):
+        if cli_val is not None:
+            return cli_val
+        ref = cfg
+        for key in cfg_path:
+            if not isinstance(ref, dict) or key not in ref:
+                if required and default is None:
+                    raise ValueError(
+                        f"Missing {'.'.join(cfg_path)} — provide via --config or CLI override"
+                    )
+                return default
+            ref = ref[key]
+        return ref
+
+    generator = _resolve(args.generator, ["model", "generator"])
+    verifier = _resolve(args.verifier, ["model", "verifier"])
+    max_len = _resolve(args.max_length, ["reward", "max_verifier_length"], default=2048)
+
+    # Build benchmark dict: prefer CLI, else look up in config's benchmarks list.
+    if args.benchmark_dataset is not None:
+        bench = {
+            "name": args.benchmark,
+            "dataset": args.benchmark_dataset,
+            "split": args.benchmark_split,
+            "problem_key": args.benchmark_problem_key,
+            "answer_key": args.benchmark_answer_key,
+        }
+    else:
+        if "benchmarks" not in cfg:
+            raise ValueError(
+                "Must provide either --benchmark-dataset or a --config with a benchmarks list"
+            )
+        bench = next(b for b in cfg["benchmarks"] if b["name"] == args.benchmark)
+
     wandb.init(
         project=args.wandb_project,
         name=args.wandb_run_name,
         config={
             **{f"cfg_{k}": v for k, v in cfg.items() if not isinstance(v, list)},
-            "generator": cfg["model"]["generator"],
-            "verifier": cfg["model"]["verifier"],
+            "generator": generator,
+            "verifier": verifier,
             "benchmark": args.benchmark,
+            "benchmark_dataset": bench["dataset"],
             "max_samples": args.max_samples,
             "num_generations": args.num_generations,
             "temperature": args.temperature,
@@ -179,29 +225,28 @@ def main():
     # Touch the file so wandb has something to watch even before tee writes.
     open(log_path, "a").close()
     wandb.save(log_path, base_path=_os.path.dirname(log_path), policy="live")
-    bench = next(b for b in cfg["benchmarks"] if b["name"] == args.benchmark)
 
     gen_device = "cuda:0" if torch.cuda.is_available() else "cpu"
     ver_device = "cuda:1" if torch.cuda.device_count() > 1 else gen_device
-    gen_max_len = cfg["reward"]["max_verifier_length"]
-    ver_max_len = cfg["reward"]["max_verifier_length"]
+    gen_max_len = max_len
+    ver_max_len = max_len
 
-    print(f"Loading generator {cfg['model']['generator']} on {gen_device}")
-    gen_tok = AutoTokenizer.from_pretrained(cfg["model"]["generator"])
+    print(f"Loading generator {generator} on {gen_device}")
+    gen_tok = AutoTokenizer.from_pretrained(generator)
     if gen_tok.pad_token is None:
         gen_tok.pad_token = gen_tok.eos_token
     gen_tok.padding_side = "left"
     gen_model = AutoModelForCausalLM.from_pretrained(
-        cfg["model"]["generator"], torch_dtype=torch.bfloat16,
+        generator, torch_dtype=torch.bfloat16,
     ).to(gen_device)
     gen_model.eval()
 
-    print(f"Loading verifier {cfg['model']['verifier']} on {ver_device}")
-    ver_tok = AutoTokenizer.from_pretrained(cfg["model"]["verifier"])
+    print(f"Loading verifier {verifier} on {ver_device}")
+    ver_tok = AutoTokenizer.from_pretrained(verifier)
     if ver_tok.pad_token is None:
         ver_tok.pad_token = ver_tok.eos_token
     ver_model = AutoModelForCausalLM.from_pretrained(
-        cfg["model"]["verifier"], torch_dtype=torch.bfloat16,
+        verifier, torch_dtype=torch.bfloat16,
     ).to(ver_device)
     ver_model.eval()
 
