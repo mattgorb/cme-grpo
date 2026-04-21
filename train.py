@@ -186,6 +186,10 @@ def main():
             f"num_generations ({num_gen})"
         )
 
+    grpo_kwargs = {}
+    if cfg["training"].get("steps_per_generation") is not None:
+        grpo_kwargs["steps_per_generation"] = cfg["training"]["steps_per_generation"]
+
     grpo_cfg = GRPOConfig(
         output_dir=cfg["training"]["output_dir"],
         learning_rate=cfg["training"]["learning_rate"],
@@ -208,6 +212,7 @@ def main():
         gradient_checkpointing=True,
         save_total_limit=1,
         report_to=["wandb"],
+        **grpo_kwargs,
     )
 
     # Cache baseline generations (5 MATH-500 problems) for side-by-side logging.
