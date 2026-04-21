@@ -65,6 +65,10 @@ reward:
   #   perplexity         — exp(CE)
   #   predictive_entropy — -sum_v p_v log p_v over vocab (label-free uncertainty)
   # reward_metric: predictive_entropy
+  # answer_weight: float in [0, 1]. When set, overrides answer_only_cme and uses
+  #   r = -[(1-w)*mean(CE over full response) + w*mean(CE over \boxed{} span)]
+  #   0.0 = full only, 1.0 = answer only, 0.5 = equal weighting.
+  answer_weight: 0.5
 
 eval:
   max_new_tokens: 3072
