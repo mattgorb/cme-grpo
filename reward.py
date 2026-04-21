@@ -41,6 +41,30 @@ def _find_boxed_span(text: str) -> Optional[tuple]:
     return None
 
 
+def _per_token_metric(logits: torch.Tensor, shift_labels: torch.Tensor, use_pe: bool) -> torch.Tensor:
+    """Return a [B, T] per-position scalar tensor.
+
+    use_pe=False: cross-entropy of the actual label token -log p(label).
+    use_pe=True : predictive entropy -sum_v p_v log p_v over the full vocab.
+    Chunked over T to cap peak memory at [1, chunk, V] instead of [1, T, V].
+    """
+    if not use_pe:
+        return torch.nn.functional.cross_entropy(
+            logits.reshape(-1, logits.size(-1)),
+            shift_labels.reshape(-1),
+            ignore_index=-100,
+            reduction="none",
+        ).reshape(shift_labels.shape)
+    T = logits.shape[1]
+    out = torch.empty(shift_labels.shape, device=logits.device, dtype=torch.float32)
+    chunk = 256
+    for s in range(0, T, chunk):
+        e = s + chunk
+        lp = torch.log_softmax(logits[:, s:e, :], dim=-1)
+        out[:, s:e] = -(lp.exp() * lp).sum(dim=-1).float()
+    return out
+
+
 class CMERewardModel:
     def __init__(
         self,
@@ -77,12 +101,21 @@ class CMERewardModel:
     ) -> Union[List[float], List[torch.Tensor]]:
         """Compute the CME reward.
 
-        reward_metric: "entropy" (default) uses CE (log-space); "perplexity" uses
-        exp(CE). Both are negated so lower verifier-surprise => higher reward.
+        reward_metric:
+          "entropy"            cross-entropy -log p(label) in nats (misnamed;
+                               kept for backward compat).
+          "perplexity"         exp(CE).
+          "predictive_entropy" -sum_v p_v log p_v over vocab at each position
+                               (does not depend on the actual label token).
+        All are negated so lower verifier-surprise => higher reward.
         """
-        if reward_metric not in ("entropy", "perplexity"):
-            raise ValueError(f"reward_metric must be 'entropy' or 'perplexity', got {reward_metric!r}")
+        if reward_metric not in ("entropy", "perplexity", "predictive_entropy"):
+            raise ValueError(
+                f"reward_metric must be 'entropy', 'perplexity', or 'predictive_entropy', "
+                f"got {reward_metric!r}"
+            )
         use_ppl = reward_metric == "perplexity"
+        use_pe = reward_metric == "predictive_entropy"
         rewards: List = []
         for prompt, response in zip(prompts, responses):
             if not response or not response.strip():
@@ -131,12 +164,7 @@ class CMERewardModel:
             shift_labels = labels[:, 1:]
 
             if token_level:
-                per_tok_ce = torch.nn.functional.cross_entropy(
-                    logits.reshape(-1, logits.size(-1)),
-                    shift_labels.reshape(-1),
-                    ignore_index=-100,
-                    reduction="none",
-                ).reshape(shift_labels.shape)
+                per_tok_ce = _per_token_metric(logits, shift_labels, use_pe)
                 # Grab only response positions (where labels != -100).
                 mask = shift_labels[0] != -100
                 verifier_token_ce = per_tok_ce[0][mask].cpu()  # [response_len]
@@ -177,12 +205,7 @@ class CMERewardModel:
                     tok_rw = verifier_token_ce.exp() if use_ppl else verifier_token_ce
                     rewards.append(-tok_rw)
             else:
-                per_tok_ce = torch.nn.functional.cross_entropy(
-                    logits.reshape(-1, logits.size(-1)),
-                    shift_labels.reshape(-1),
-                    ignore_index=-100,
-                    reduction="none",
-                ).reshape(shift_labels.shape)
+                per_tok_ce = _per_token_metric(logits, shift_labels, use_pe)
                 ce_row = per_tok_ce[0]
                 label_mask = shift_labels[0] != -100
 
