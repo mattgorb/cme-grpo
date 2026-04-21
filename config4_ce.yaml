@@ -43,8 +43,8 @@ training:
   #steps_per_generation: 1
   num_train_epochs: 1
   max_steps: 10000
-  warmup_steps: 0
-  warmup_ratio: 0.1
+  warmup_steps: 20
+  #warmup_ratio: 0.1
   lr_scheduler_type: cosine  
   logging_steps: 1
   save_steps: 200
@@ -59,7 +59,7 @@ reward:
   max_verifier_length: 3072
   token_level: false
   answer_only_cme: false
-  no_box_penalty: 4
+  no_box_penalty: 5
   # reward_metric options:
   #   entropy            — cross-entropy -log p(label) in nats (misnamed; default)
   #   perplexity         — exp(CE)
