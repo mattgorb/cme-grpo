@@ -172,6 +172,7 @@ def main():
     answer_only = cfg.get("reward", {}).get("answer_only_cme", False)
     no_box_penalty = cfg.get("reward", {}).get("no_box_penalty", 5.0)
     reward_metric = cfg.get("reward", {}).get("reward_metric", "entropy")
+    answer_weight = cfg.get("reward", {}).get("answer_weight", None)
     reward_fn = build_cme_reward_fn(
         reward_model,
         token_level=token_level,
@@ -179,6 +180,7 @@ def main():
         answer_only=answer_only,
         no_box_penalty=no_box_penalty,
         reward_metric=reward_metric,
+        answer_weight=answer_weight,
     )
 
     train_ds = build_train_dataset(cfg)
