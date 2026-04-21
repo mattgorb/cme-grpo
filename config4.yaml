@@ -36,16 +36,18 @@ generation:
 training:
   learning_rate: 3.0e-6
   max_grad_norm: 1.0
-  kl_coef: 0.01
+  kl_coef: 0.005          
   per_device_train_batch_size: 1
-  gradient_accumulation_steps: 8
+  gradient_accumulation_steps: 128   
   num_train_epochs: 1
-  max_steps: 5000
-  warmup_steps: 20
+  max_steps: 58
+  warmup_steps: 0
+  warmup_ratio: 0.1
+  lr_scheduler_type: cosine  
   logging_steps: 1
-  save_steps: 200
+  save_steps: 4
   save_total_limit: 3
-  eval_steps: 200
+  eval_steps: 4
   skip_baseline_eval: true
   output_dir: ./outputs/cme-grpo-config4
   bf16: true

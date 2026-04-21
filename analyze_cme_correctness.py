@@ -151,6 +151,8 @@ def main():
     ap.add_argument("--temperature", type=float, default=1.0)
     ap.add_argument("--max-new-tokens", type=int, default=1024)
     ap.add_argument("--output", default="cme_correctness.csv")
+    ap.add_argument("--summary-output", default=None,
+                    help="Compact CSV with mean/std/n per metric×bucket (default: <output>.summary.csv)")
     ap.add_argument("--wandb-project", default="cme-grpo-analysis")
     ap.add_argument("--wandb-run-name", default=None)
     ap.add_argument("--log-file", default="analyze.log",
@@ -457,6 +459,56 @@ def main():
                 final_metrics[f"final/{key}/{label}_n"] = len(vals)
 
     wandb.log(final_metrics)
+
+    # Compact summary CSV: one row per metric, with per-bucket mean/std/n and auroc.
+    summary_path = args.summary_output or (
+        args.output.rsplit(".", 1)[0] + ".summary.csv"
+    )
+    metric_keys = [
+        "ppl_gen_full", "ppl_gen_answer", "ppl_ver_full", "ppl_ver_answer",
+        "entropy_gen_full", "entropy_gen_answer", "entropy_ver_full", "entropy_ver_answer",
+        "ce_gen_full", "ce_gen_answer", "ce_ver_full", "ce_ver_answer",
+    ]
+    summary_rows = []
+    for key in metric_keys:
+        buckets = {}
+        for label in ("correct", "incorrect", "none"):
+            vals = [r[key] for r in rows if r["status"] == label and not math.isnan(r[key])]
+            buckets[label] = (
+                (statistics.mean(vals), statistics.stdev(vals) if len(vals) >= 2 else 0.0, len(vals))
+                if vals else (float("nan"), float("nan"), 0)
+            )
+        au = auroc([r[key] for r in rows], [1 - r["correct"] for r in rows])
+        summary_rows.append({
+            "benchmark": args.benchmark,
+            "dataset": bench["dataset"],
+            "generator": generator,
+            "verifier": verifier,
+            "n_total": total,
+            "accuracy": n_correct / total,
+            "metric": key,
+            "correct_mean": buckets["correct"][0],
+            "correct_std": buckets["correct"][1],
+            "correct_n": buckets["correct"][2],
+            "incorrect_mean": buckets["incorrect"][0],
+            "incorrect_std": buckets["incorrect"][1],
+            "incorrect_n": buckets["incorrect"][2],
+            "none_mean": buckets["none"][0],
+            "none_std": buckets["none"][1],
+            "none_n": buckets["none"][2],
+            "auroc_wrong_gt_correct": au if au is not None else float("nan"),
+            "gap_wrong_minus_correct": (
+                buckets["incorrect"][0] - buckets["correct"][0]
+                if not math.isnan(buckets["correct"][0]) and not math.isnan(buckets["incorrect"][0])
+                else float("nan")
+            ),
+        })
+    with open(summary_path, "w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=list(summary_rows[0].keys()))
+        w.writeheader()
+        w.writerows(summary_rows)
+    print(f"\nwrote summary to {summary_path}")
+    wandb.save(_os.path.abspath(summary_path), policy="now")
 
     # Full table of every generation.
     table_cols = list(rows[0].keys())
