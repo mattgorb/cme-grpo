@@ -63,6 +63,50 @@ run_analyze "llama-3.2-1b" "meta-llama/Llama-3.2-1B" \
 run_analyze "llama-3.2-1b" "meta-llama/Llama-3.2-1B" \
     "aime24" "Maxwell-Jia/AIME_2024" "train" "Problem" "Answer" 30
 
+
+
+# ───────── Llama-3.2-1B-Instruct ─────────
+run_analyze "llama-3.2-1b" "meta-llama/Llama-3.2-1B-Instruct" \
+    "math500" "HuggingFaceH4/MATH-500" "test" "problem" "answer" 100
+
+run_analyze "llama-3.2-1b" "meta-llama/Llama-3.2-1B-Instruct" \
+    "amc23" "math-ai/amc23" "test" "question" "answer" 40
+
+run_analyze "llama-3.2-1b" "meta-llama/Llama-3.2-1B-Instruct" \
+    "aime24" "Maxwell-Jia/AIME_2024" "train" "Problem" "Answer" 30
+
+
+
+# ───────── Llama-3.2-1B ─────────
+run_analyze "llama-3.2-1b" "meta-llama/Llama-3.2-1B-Instruct" \
+    "math500" "HuggingFaceH4/MATH-500" "test" "problem" "answer" 100
+
+run_analyze "llama-3.2-1b" "meta-llama/Llama-3.2-1B-Instruct" \
+    "amc23" "math-ai/amc23" "test" "question" "answer" 40
+
+run_analyze "llama-3.2-1b" "meta-llama/Llama-3.2-1B-Instruct" \
+    "aime24" "Maxwell-Jia/AIME_2024" "train" "Problem" "Answer" 30
+
+# ───────── Qwen2.5-1.5B (general base — matches Intuitor paper) ─────────
+run_analyze "qwen-1.5b" "Qwen/Qwen2.5-1.5B" \
+    "math500" "HuggingFaceH4/MATH-500" "test" "problem" "answer" 100
+
+run_analyze "qwen-1.5b" "Qwen/Qwen2.5-1.5B" \
+    "amc23" "math-ai/amc23" "test" "question" "answer" 40
+
+run_analyze "qwen-1.5b" "Qwen/Qwen2.5-1.5B" \
+    "aime24" "Maxwell-Jia/AIME_2024" "train" "Problem" "Answer" 30
+
+# ───────── Gemma-2-2B (different family) ─────────
+run_analyze "gemma-2-2b" "google/gemma-2-2b" \
+    "math500" "HuggingFaceH4/MATH-500" "test" "problem" "answer" 100
+
+run_analyze "gemma-2-2b" "google/gemma-2-2b" \
+    "amc23" "math-ai/amc23" "test" "question" "answer" 40
+
+run_analyze "gemma-2-2b" "google/gemma-2-2b" \
+    "aime24" "Maxwell-Jia/AIME_2024" "train" "Problem" "Answer" 30
+
 echo ""
 echo "============================================================"
 echo "All runs complete."

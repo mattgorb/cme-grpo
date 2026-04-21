@@ -296,6 +296,10 @@ def main():
                 status_label = "incorrect"
 
             row = {
+                "benchmark": args.benchmark,
+                "dataset": bench["dataset"],
+                "generator": generator,
+                "verifier": verifier,
                 "idx": i,
                 "gen": k,
                 "gold": gold,
