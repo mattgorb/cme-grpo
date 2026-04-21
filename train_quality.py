@@ -140,7 +140,7 @@ def _judge_pairwise(
 
     wins_a, wins_b, ties = 0, 0, 0
 
-    for instruction, resp_a, resp_b in zip(instructions, responses_a, responses_b):
+    for i, (instruction, resp_a, resp_b) in enumerate(zip(instructions, responses_a, responses_b)):
         # Randomize presentation order to mitigate position bias.
         if random.random() < 0.5:
             first, second = resp_a, resp_b
