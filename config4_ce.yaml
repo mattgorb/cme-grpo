@@ -58,7 +58,7 @@ training:
 reward:
   max_verifier_length: 3072
   token_level: false
-  answer_only_cme: true
+  answer_only_cme: false
   no_box_penalty: 4
   # reward_metric options:
   #   entropy            — cross-entropy -log p(label) in nats (misnamed; default)
