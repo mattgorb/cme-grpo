@@ -43,6 +43,19 @@ def build_train_dataset(cfg: dict):
     return ds.map(_map, remove_columns=[c for c in ds.column_names if c not in keep])
 
 
+class GradientStepPrintCallback(TrainerCallback):
+    """Print a line every time the optimizer updates weights (once per global_step)."""
+    def on_step_end(self, args, state, control, **kwargs):
+        n_prompts = args.per_device_train_batch_size * args.gradient_accumulation_steps
+        print(
+            f"[grad-update] step={state.global_step} "
+            f"prompts_this_step={n_prompts} "
+            f"completions_this_step={n_prompts * args.num_generations}",
+            flush=True,
+        )
+        return control
+
+
 class PeriodicEvalCallback(TrainerCallback):
     def __init__(self, cfg: dict, eval_steps: int, baseline_samples=None):
         self.cfg = cfg
@@ -247,7 +260,10 @@ def main():
         reward_funcs=reward_fn,
         args=grpo_cfg,
         train_dataset=train_ds,
-        callbacks=[PeriodicEvalCallback(cfg, cfg["training"]["eval_steps"], baseline_samples=baseline_samples)],
+        callbacks=[
+            GradientStepPrintCallback(),
+            PeriodicEvalCallback(cfg, cfg["training"]["eval_steps"], baseline_samples=baseline_samples),
+        ],
     )
 
     if not cfg["training"].get("skip_baseline_eval", False):

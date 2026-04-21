@@ -310,7 +310,7 @@ def build_cme_reward_fn(
         from eval import is_correct
         gold_answers = kwargs.get("gold_answer", [None] * len(completion_texts))
         unique_golds = list(dict.fromkeys(g for g in gold_answers if g))
-        print(f"  gold: {unique_golds}")
+        # print(f"  gold: {unique_golds}")
         extracted = []
         for c, gold in zip(completion_texts, gold_answers):
             span = _find_boxed_span(c)
@@ -320,9 +320,9 @@ def build_cme_reward_fn(
                 tag = "✓" if is_correct(pred, gold) else "✗"
                 ans = f"{ans} {tag}"
             extracted.append(ans)
-        print(f"  extracted \\boxed{{}}: {extracted}")
+        # print(f"  extracted \\boxed{{}}: {extracted}")
         # Print first completion's full text for reasoning inspection.
-        print(f"  completion[0] ({len(completion_texts[0])} chars): {completion_texts[0][:500]}")
+        # print(f"  completion[0] ({len(completion_texts[0])} chars): {completion_texts[0][:500]}")
 
         raw = reward_model.score(
             prompt_texts, completion_texts,
@@ -381,8 +381,8 @@ def build_cme_reward_fn(
                 print(f"  normalized tensor[0][:5]: {normalized_rewards[0][:5].tolist()}")
             return scalar_rewards
         else:
-            if _call_count[0] <= 3:
-                print(f"  rewards: {raw}")
+            # if _call_count[0] <= 3:
+            #     print(f"  rewards: {raw}")
             return raw
 
     reward_fn.last_token_rewards = None
