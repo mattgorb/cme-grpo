@@ -334,12 +334,16 @@ def main():
             "entropy_gen_full", "entropy_gen_answer",
             "entropy_ver_full", "entropy_ver_answer",
         ]
-        def _mean(key, label):
+        def _stats(key, label):
             vals = [
                 r[key] for r in rows
                 if r["status"] == label and not math.isnan(r[key])
             ]
-            return (sum(vals) / len(vals), len(vals)) if vals else (float("nan"), 0)
+            if not vals:
+                return (float("nan"), float("nan"), 0)
+            mean = sum(vals) / len(vals)
+            std = statistics.stdev(vals) if len(vals) >= 2 else 0.0
+            return (mean, std, len(vals))
 
         n_c = sum(1 for r in rows if r["status"] == "correct")
         n_i = sum(1 for r in rows if r["status"] == "incorrect")
@@ -353,23 +357,28 @@ def main():
             "running/n_none": n_n,
         }
         for key in metric_keys:
-            mc, cc = _mean(key, "correct")
-            mi, ci = _mean(key, "incorrect")
-            mn, cn = _mean(key, "none")
-            def _fmt(v):
-                return f"{v:8.3f}" if not math.isnan(v) else "     NaN"
+            mc, sc, cc = _stats(key, "correct")
+            mi, si, ci = _stats(key, "incorrect")
+            mn, sn, cn = _stats(key, "none")
+            def _fmt(v, s):
+                if math.isnan(v):
+                    return "     NaN         "
+                return f"{v:8.3f}±{s:6.3f}"
             print(
                 f"    {key:22s}  "
-                f"correct={_fmt(mc)} (n={cc})  "
-                f"incorrect={_fmt(mi)} (n={ci})  "
-                f"none={_fmt(mn)} (n={cn})"
+                f"correct={_fmt(mc, sc)} (n={cc})  "
+                f"incorrect={_fmt(mi, si)} (n={ci})  "
+                f"none={_fmt(mn, sn)} (n={cn})"
             )
             if not math.isnan(mc):
                 wb_payload[f"running/{key}/correct"] = mc
+                wb_payload[f"running/{key}/correct_std"] = sc
             if not math.isnan(mi):
                 wb_payload[f"running/{key}/incorrect"] = mi
+                wb_payload[f"running/{key}/incorrect_std"] = si
             if not math.isnan(mn):
                 wb_payload[f"running/{key}/none"] = mn
+                wb_payload[f"running/{key}/none_std"] = sn
         wandb.log(wb_payload, step=i + 1)
 
     if not rows:
@@ -394,9 +403,13 @@ def main():
             return
         au = auroc([r[key] for r in rows], [1 - r["correct"] for r in rows])
         au_str = f"{au:.3f}" if au is not None else "NA"
+        c_std = statistics.stdev(cor) if len(cor) >= 2 else 0.0
+        w_std = statistics.stdev(wro) if len(wro) >= 2 else 0.0
         print(
-            f"{label}: correct mean={statistics.mean(cor):7.3f} med={statistics.median(cor):7.3f} | "
-            f"wrong mean={statistics.mean(wro):7.3f} med={statistics.median(wro):7.3f} | "
+            f"{label}: correct mean={statistics.mean(cor):7.3f}±{c_std:6.3f} "
+            f"med={statistics.median(cor):7.3f} | "
+            f"wrong mean={statistics.mean(wro):7.3f}±{w_std:6.3f} "
+            f"med={statistics.median(wro):7.3f} | "
             f"AUROC(wrong>correct)={au_str}"
         )
 
@@ -418,8 +431,14 @@ def main():
         au = auroc([r[key] for r in rows], [1 - r["correct"] for r in rows])
         if cor:
             final_metrics[f"final/{key}/correct_mean"] = statistics.mean(cor)
+            final_metrics[f"final/{key}/correct_std"] = (
+                statistics.stdev(cor) if len(cor) >= 2 else 0.0
+            )
         if wro:
             final_metrics[f"final/{key}/wrong_mean"] = statistics.mean(wro)
+            final_metrics[f"final/{key}/wrong_std"] = (
+                statistics.stdev(wro) if len(wro) >= 2 else 0.0
+            )
         if au is not None:
             final_metrics[f"final/{key}/auroc_wrong_gt_correct"] = au
 
@@ -432,6 +451,9 @@ def main():
             vals = [r[key] for r in rows if r["status"] == label and not math.isnan(r[key])]
             if vals:
                 final_metrics[f"final/{key}/{label}_mean"] = sum(vals) / len(vals)
+                final_metrics[f"final/{key}/{label}_std"] = (
+                    statistics.stdev(vals) if len(vals) >= 2 else 0.0
+                )
                 final_metrics[f"final/{key}/{label}_n"] = len(vals)
 
     wandb.log(final_metrics)
