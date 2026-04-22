@@ -179,3 +179,23 @@ meta-llama/Llama-3.2-1B-Instruct      1.2B   24.0%   24.0%
 ((pytorch) ) [ec2-user@ip-10-77-1-204 cme-grpo]$ 
 ```
 
+
+
+
+
+
+
+"google/gemma-4-E2B"
+    [8/100] running acc: 0.000
+    [16/100] running acc: 0.062
+    [24/100] running acc: 0.042
+    [32/100] running acc: 0.031
+    [40/100] running acc: 0.050
+    [48/100] running acc: 0.104
+    [56/100] running acc: 0.089
+    [64/100] running acc: 0.078
+    [72/100] running acc: 0.083
+    [80/100] running acc: 0.075
+    [88/100] running acc: 0.068
+    [96/100] running acc: 0.062
+  math500: pass@1 = 0.0700 (7/100)
