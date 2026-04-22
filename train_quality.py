@@ -7,6 +7,16 @@ answer correctness checking.
 
 from __future__ import annotations
 
+# Force UTF-8 for Path.read_text so HF Hub's ASCII-default model-card template
+# load doesn't crash on containers with POSIX/ASCII locale.
+import pathlib as _pathlib
+_orig_read_text = _pathlib.Path.read_text
+def _read_text_utf8(self, encoding=None, errors=None, newline=None):
+    if encoding is None:
+        encoding = "utf-8"
+    return _orig_read_text(self, encoding=encoding, errors=errors, newline=newline)
+_pathlib.Path.read_text = _read_text_utf8
+
 import os
 import random
 from typing import List
