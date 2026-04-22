@@ -382,117 +382,135 @@ def paper_figure(
     c_ver = "#4c78a8"
     c_chance = "#d62728"
 
-    fig, axs = plt.subplots(1, 3, figsize=(14, 4.2),
-                            gridspec_kw={"width_ratios": [1, 1, 1.3]})
+    from matplotlib.gridspec import GridSpec
+    fig = plt.figure(figsize=(13, 4.0))
+    gs = GridSpec(2, 3, figure=fig,
+                  width_ratios=[0.95, 1.0, 0.8], hspace=0.5, wspace=0.3)
+    ax_a = fig.add_subplot(gs[:, 0])       # qualitative example, spans rows
+    ax_b = fig.add_subplot(gs[:, 1])       # AUROC bar chart, spans rows
+    ax_c_top = fig.add_subplot(gs[0, 2])   # gen density
+    ax_c_bot = fig.add_subplot(gs[1, 2])   # ver density
 
-    # ───────── Panels (a) & (b): bar charts for two datasets ─────────
-    # Panel (a): qualitative example (placeholder — edit in plot_qualitative_example).
-    plot_qualitative_example(axs[0])
+    # ───────── Panel (a): qualitative example ─────────
+    plot_qualitative_example(ax_a)
 
-    # Panel (b): AUROC bar chart for the second dataset in bar_datasets.
-    # (First entry in bar_datasets is effectively unused now that panel (a) is the example.)
+    # ───────── Panel (b): AUROC bar chart for one dataset ─────────
     bar_exclusions = {
         "math500": {"gemma-2-2b"},
     }
     bench = bar_datasets[1] if len(bar_datasets) >= 2 else bar_datasets[0]
-    ax = axs[1]
-    sub = stats[stats["benchmark"] == bench]
+    sub_b = stats[stats["benchmark"] == bench]
     excluded = bar_exclusions.get(bench, set())
     if excluded:
-        sub = sub[~sub["generator"].isin(excluded)]
-    sub = sub.sort_values("generator").reset_index(drop=True)
-    if sub.empty:
-        ax.text(0.5, 0.5, f"(no data for {bench})", transform=ax.transAxes,
-                ha="center", va="center", fontsize=10, color="gray")
-        ax.set_xticks([])
-        ax.set_yticks([])
-        ax.set_title(bench, fontsize=10)
+        sub_b = sub_b[~sub_b["generator"].isin(excluded)]
+    sub_b = sub_b.sort_values("generator").reset_index(drop=True)
+    if sub_b.empty:
+        ax_b.text(0.5, 0.5, f"(no data for {bench})", transform=ax_b.transAxes,
+                  ha="center", va="center", fontsize=10, color="gray")
+        ax_b.set_xticks([])
+        ax_b.set_yticks([])
+        ax_b.set_title(bench, fontsize=10)
     else:
-        x = np.arange(len(sub))
+        x = np.arange(len(sub_b))
         w = 0.38
-        ax.bar(x - w / 2, sub["ce_gen_answer_auroc"], w,
-               color=c_gen, edgecolor="black", linewidth=0.6,
-               label="generator self-CE")
-        ax.bar(x + w / 2, sub["ce_ver_answer_auroc"], w,
-               color=c_ver, edgecolor="black", linewidth=0.6,
-               label="verifier CE (CME)")
-        ax.axhline(0.5, color=c_chance, linestyle="--", linewidth=0.8, alpha=0.7)
-        ax.set_ylim(0.4, 1.0)
-        ax.set_xticks(x)
-        ax.set_xticklabels(sub["generator"], rotation=30, ha="right", fontsize=8)
-        ax.set_ylabel("AUROC (wrong $>$ correct)")
-        ax.set_title(bench, fontsize=11)
-        ax.grid(axis="y", alpha=0.25, linewidth=0.5)
-        for xi, v in zip(x - w / 2, sub["ce_gen_answer_auroc"]):
+        ax_b.bar(x - w / 2, sub_b["ce_gen_answer_auroc"], w,
+                 color=c_gen, edgecolor="black", linewidth=0.6,
+                 label="generator self-CE")
+        ax_b.bar(x + w / 2, sub_b["ce_ver_answer_auroc"], w,
+                 color=c_ver, edgecolor="black", linewidth=0.6,
+                 label="verifier CE (CME)")
+        ax_b.axhline(0.5, color=c_chance, linestyle="--", linewidth=0.8, alpha=0.7)
+        ax_b.set_ylim(0.4, 1.0)
+        ax_b.set_xticks(x)
+        ax_b.set_xticklabels(sub_b["generator"], rotation=30, ha="right", fontsize=8)
+        ax_b.set_ylabel("AUROC (wrong $>$ correct)")
+        ax_b.set_title(bench, fontsize=11)
+        ax_b.grid(axis="y", alpha=0.25, linewidth=0.5)
+        for xi, v in zip(x - w / 2, sub_b["ce_gen_answer_auroc"]):
             if not np.isnan(v):
-                ax.text(xi, v + 0.01, f"{v:.2f}", ha="center", va="bottom", fontsize=7)
-        for xi, v in zip(x + w / 2, sub["ce_ver_answer_auroc"]):
+                ax_b.text(xi, v + 0.01, f"{v:.2f}", ha="center", va="bottom", fontsize=7)
+        for xi, v in zip(x + w / 2, sub_b["ce_ver_answer_auroc"]):
             if not np.isnan(v):
-                ax.text(xi, v + 0.01, f"{v:.2f}", ha="center", va="bottom", fontsize=7)
-        ax.legend(loc="lower right", fontsize=8, frameon=True)
+                ax_b.text(xi, v + 0.01, f"{v:.2f}", ha="center", va="bottom", fontsize=7)
+        ax_b.legend(loc="lower right", fontsize=8, frameon=True)
 
-    # ───────── Panel (c): win-loss scatter ─────────
-    ax = axs[2]
-    bench_colors = {
-        "math500": "#1f77b4",  # blue
-        "amc23":   "#2ca02c",  # green
-        "aime24":  "#d62728",  # red
-    }
-    metric_markers = {
-        "ce_full":   ("^", "CE-full"),
-        "ce_answer": ("D", "CE-ans"),
-    }
-    # Only CE metric families in the scatter.
-    scatter_stats = all_metric_stats[all_metric_stats["metric"].isin(metric_markers.keys())]
+    # ───────── Panel (c): density plot ─────────
+    # Use a single representative (generator, benchmark) pair so we don't blend
+    # CE scales across models. Default to qwen-math-1.5b on math500 if present,
+    # else fall back to the first pair with enough data.
+    c_correct = "#2ca02c"
+    c_wrong = "#d62728"
 
-    ver_wins = gen_wins = 0
-    for _, row in scatter_stats.iterrows():
-        if pd.isna(row["auroc_gen"]) or pd.isna(row["auroc_ver"]):
-            continue
-        marker, _ = metric_markers.get(row["metric"], ("o", row["metric"]))
-        color = bench_colors.get(row["benchmark"], "gray")
-        ax.scatter(row["auroc_gen"], row["auroc_ver"],
-                   c=color, marker=marker, s=70,
-                   edgecolors="black", linewidths=0.7, alpha=0.9)
-        if row["auroc_ver"] > row["auroc_gen"]:
-            ver_wins += 1
-        else:
-            gen_wins += 1
+    preferred = [("qwen-math-1.5b", "math500"), ("qwen-1.5b", "math500")]
+    chosen = None
+    for gen_key, bench_key in preferred:
+        sub = df[(df["generator"] == gen_key) & (df["benchmark"] == bench_key)]
+        if (sub["correct"] == 1).sum() >= 5 and (sub["correct"] == 0).sum() >= 5:
+            chosen = (gen_key, bench_key, sub)
+            break
+    if chosen is None:
+        for (gen_key, bench_key), sub in df.groupby(["generator", "benchmark"]):
+            if (sub["correct"] == 1).sum() >= 5 and (sub["correct"] == 0).sum() >= 5:
+                chosen = (gen_key, bench_key, sub)
+                break
+    if chosen is None:
+        ax_c_top.text(0.5, 0.5, "(no data)", transform=ax_c_top.transAxes,
+                      ha="center", va="center", color="gray")
+        ax_c_bot.text(0.5, 0.5, "(no data)", transform=ax_c_bot.transAxes,
+                      ha="center", va="center", color="gray")
+    else:
+        gen_key, bench_key, sub = chosen
+        gen_cor = sub.loc[sub["correct"] == 1, "ce_gen_answer"].dropna().values
+        gen_wro = sub.loc[sub["correct"] == 0, "ce_gen_answer"].dropna().values
+        ver_cor = sub.loc[sub["correct"] == 1, "ce_ver_answer"].dropna().values
+        ver_wro = sub.loc[sub["correct"] == 0, "ce_ver_answer"].dropna().values
 
-    ax.plot([0, 1], [0, 1], "--", color="gray", alpha=0.6, linewidth=0.8)
-    ax.fill_between([0, 1], [0, 1], 1, color="#ffe5cc", alpha=0.3)
-    ax.fill_between([0, 1], 0, [0, 1], color="#e6e6ff", alpha=0.3)
-    ax.set_xlim(0, 1)
-    ax.set_ylim(0, 1)
-    ax.set_xlabel("Generator-side AUROC (self-confidence)")
-    ax.set_ylabel("Verifier-side AUROC (CME)")
-    ax.text(0.23, 0.92, f"VERIFIER wins\n(n={ver_wins})", fontsize=9,
-            ha="center", va="top", color="darkorange", fontweight="bold")
-    ax.text(0.77, 0.08, f"GENERATOR wins\n(n={gen_wins})", fontsize=9,
-            ha="center", va="bottom", color="#3333aa", fontweight="bold")
-    ax.grid(alpha=0.25, linewidth=0.5)
+        try:
+            from scipy.stats import gaussian_kde
+            has_kde = True
+        except ImportError:
+            has_kde = False
 
-    # Two legends: benchmarks (colors, center-left) and metric families (shapes).
-    from matplotlib.lines import Line2D
-    bench_handles = [
-        Line2D([0], [0], marker="o", color="w", markerfacecolor=col,
-               markeredgecolor="black", markersize=8, label=b)
-        for b, col in bench_colors.items()
-        if b in scatter_stats["benchmark"].values
-    ]
-    metric_handles = [
-        Line2D([0], [0], marker=m, color="w", markerfacecolor="gray",
-               markeredgecolor="black", markersize=8, label=lab)
-        for (m, lab) in metric_markers.values()
-    ]
-    leg1 = ax.legend(handles=bench_handles, title="benchmark",
-                     loc="center left", fontsize=7, title_fontsize=7, frameon=True)
-    ax.add_artist(leg1)
-    ax.legend(handles=metric_handles, title="metric family",
-              loc="center right", fontsize=7, title_fontsize=7, frameon=True)
+        def _plot_density(ax, cor, wro, title, title_color):
+            all_vals = np.concatenate([cor, wro]) if len(cor) and len(wro) else np.array([0.0, 1.0])
+            x_lo = max(0.0, float(np.quantile(all_vals, 0.02)))
+            x_hi = float(np.quantile(all_vals, 0.95))
+            if x_hi - x_lo < 0.2:
+                x_hi = x_lo + 1.0
+            x_grid = np.linspace(x_lo, x_hi, 250)
+
+            if has_kde:
+                if len(wro) >= 2:
+                    y = gaussian_kde(wro)(x_grid)
+                    ax.fill_between(x_grid, y, color=c_wrong, alpha=0.35)
+                    ax.plot(x_grid, y, color=c_wrong, linewidth=1.8,
+                            label="wrong")
+                if len(cor) >= 2:
+                    y = gaussian_kde(cor)(x_grid)
+                    ax.fill_between(x_grid, y, color=c_correct, alpha=0.35)
+                    ax.plot(x_grid, y, color=c_correct, linewidth=1.8,
+                            label="correct")
+            else:
+                bins = np.linspace(x_lo, x_hi, 35)
+                ax.hist(wro, bins=bins, density=True, alpha=0.5,
+                        color=c_wrong, label="wrong",
+                        edgecolor="white", linewidth=0.3)
+                ax.hist(cor, bins=bins, density=True, alpha=0.5,
+                        color=c_correct, label="correct",
+                        edgecolor="white", linewidth=0.3)
+
+            ax.set_xlim(x_lo, x_hi)
+            ax.set_title(title, fontsize=10, color=title_color, fontweight="bold")
+            ax.set_ylabel("density", fontsize=9)
+            ax.grid(alpha=0.25, linewidth=0.5)
+
+        _plot_density(ax_c_top, gen_cor, gen_wro, "Generator Self-CE", c_gen)
+        _plot_density(ax_c_bot, ver_cor, ver_wro, "Verifier CE", c_ver)
+        ax_c_bot.set_xlabel("CE on \\boxed{} span", fontsize=9)
+        ax_c_top.legend(loc="upper right", frameon=False, fontsize=8)
 
     # Panel labels (a) (b) (c).
-    for ax_i, lbl in zip(axs, "abc"):
+    for ax_i, lbl in zip([ax_a, ax_b, ax_c_top], "abc"):
         ax_i.text(-0.14, 1.05, f"({lbl})",
                   transform=ax_i.transAxes, fontweight="bold", fontsize=12)
 

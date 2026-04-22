@@ -9,12 +9,17 @@ from __future__ import annotations
 
 # Force UTF-8 for Path.read_text so HF Hub's ASCII-default model-card template
 # load doesn't crash on containers with POSIX/ASCII locale.
+# Only forward newline= when explicitly provided — Python 3.12's Path.read_text
+# doesn't accept it (3.13+ added that kwarg).
 import pathlib as _pathlib
 _orig_read_text = _pathlib.Path.read_text
 def _read_text_utf8(self, encoding=None, errors=None, newline=None):
     if encoding is None:
         encoding = "utf-8"
-    return _orig_read_text(self, encoding=encoding, errors=errors, newline=newline)
+    kwargs = {"encoding": encoding, "errors": errors}
+    if newline is not None:
+        kwargs["newline"] = newline
+    return _orig_read_text(self, **kwargs)
 _pathlib.Path.read_text = _read_text_utf8
 
 import os
