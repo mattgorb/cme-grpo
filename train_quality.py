@@ -116,12 +116,17 @@ def build_quality_reward_fn(reward_model: CMERewardModel, reward_metric: str = "
     return reward_fn
 
 
-def _generate_responses(model, tokenizer, prompts: list[str], device: str, max_new_tokens: int = 1024) -> list[str]:
+def _generate_responses(model, tokenizer, prompts: list[str], device: str, max_new_tokens: int = 1024, label: str = "") -> list[str]:
     """Generate greedy responses for a batch of already-formatted prompts."""
+    import time as _time
     model.eval()
     responses = []
     batch_size = 4
-    for i in range(0, len(prompts), batch_size):
+    n_total = len(prompts)
+    t_start = _time.time()
+    tag = f"[{label}] " if label else ""
+    print(f"{tag}generating {n_total} responses (batch_size={batch_size}, max_new_tokens={max_new_tokens})...", flush=True)
+    for i in range(0, n_total, batch_size):
         batch = prompts[i : i + batch_size]
         enc = tokenizer(
             batch, return_tensors="pt", padding=True,
@@ -135,6 +140,13 @@ def _generate_responses(model, tokenizer, prompts: list[str], device: str, max_n
         for j in range(len(batch)):
             gen_ids = out[j, enc.input_ids.shape[1]:]
             responses.append(tokenizer.decode(gen_ids, skip_special_tokens=True))
+        done = i + len(batch)
+        elapsed = _time.time() - t_start
+        rate = done / max(elapsed, 1e-6)
+        eta = (n_total - done) / max(rate, 1e-6)
+        print(f"{tag}  [{done}/{n_total}] elapsed={elapsed:.0f}s  eta={eta:.0f}s", flush=True)
+    total_time = _time.time() - t_start
+    print(f"{tag}done: {n_total} responses in {total_time:.0f}s", flush=True)
     return responses
 
 
@@ -273,17 +285,25 @@ class LLMJudgeEvalCallback(TrainerCallback):
                 model, tokenizer, self.eval_prompts, str(device), max_new_tokens,
             )
 
-            print(f"[step {state.global_step}] running LLM judge (finetuned vs base)...")
-            vs_base = _judge_pairwise(
-                self.eval_instructions, ft_responses, self.base_responses,
-                judge_model=self.judge_model, label_a="finetuned", label_b="base",
-            )
+            print(f"[step {state.global_step}] running LLM judge (finetuned vs base)...", flush=True)
+            try:
+                vs_base = _judge_pairwise(
+                    self.eval_instructions, ft_responses, self.base_responses,
+                    judge_model=self.judge_model, label_a="finetuned", label_b="base",
+                )
+            except Exception as e:
+                print(f"  [WARN] judge vs base failed ({type(e).__name__}: {e})", flush=True)
+                vs_base = {"wins_a": 0, "wins_b": 0, "ties": 0, "total": 0, "winrate_a": 0.5, "winrate_b": 0.5}
 
-            print(f"[step {state.global_step}] running LLM judge (finetuned vs instruct)...")
-            vs_instruct = _judge_pairwise(
-                self.eval_instructions, ft_responses, self.instruct_responses,
-                judge_model=self.judge_model, label_a="finetuned", label_b="instruct",
-            )
+            print(f"[step {state.global_step}] running LLM judge (finetuned vs instruct)...", flush=True)
+            try:
+                vs_instruct = _judge_pairwise(
+                    self.eval_instructions, ft_responses, self.instruct_responses,
+                    judge_model=self.judge_model, label_a="finetuned", label_b="instruct",
+                )
+            except Exception as e:
+                print(f"  [WARN] judge vs instruct failed ({type(e).__name__}: {e})", flush=True)
+                vs_instruct = {"wins_a": 0, "wins_b": 0, "ties": 0, "total": 0, "winrate_a": 0.5, "winrate_b": 0.5}
 
             print(f"[step {state.global_step}] JUDGE RESULTS:")
             print(f"  vs base:    finetuned wins {vs_base['wins_a']}, base wins {vs_base['wins_b']}, ties {vs_base['ties']} → winrate {vs_base['winrate_a']:.1%}")
@@ -500,16 +520,19 @@ def main():
         callbacks=[eval_callback],
     )
 
-    # Run baseline judge eval before training.
+    # Run baseline judge eval before training. Non-fatal if judge API fails.
     if not cfg["training"].get("skip_baseline_eval", False):
-        print("[step 0] baseline LLM judge eval")
-        vs_base = _judge_pairwise(
-            eval_instructions, base_responses, base_responses,
-            judge_model=cfg.get("eval", {}).get("judge_model", "gpt-5.2"),
-        )
-        print(f"  baseline vs self: winrate {vs_base['winrate_a']:.1%} (sanity check — should be ~50%)")
-        if wandb.run is not None:
-            wandb.log({"eval/winrate_vs_base": 0.5, "eval/winrate_vs_instruct": 0.0}, step=0)
+        print("[step 0] baseline LLM judge eval (sanity check: base vs base should be ~50%)", flush=True)
+        try:
+            vs_base = _judge_pairwise(
+                eval_instructions, base_responses, base_responses,
+                judge_model=cfg.get("eval", {}).get("judge_model", "gpt-5.2"),
+            )
+            print(f"  baseline vs self: winrate {vs_base['winrate_a']:.1%}", flush=True)
+            if wandb.run is not None:
+                wandb.log({"eval/winrate_vs_base": 0.5, "eval/winrate_vs_instruct": 0.0}, step=0)
+        except Exception as e:
+            print(f"  [WARN] baseline judge eval failed ({type(e).__name__}: {e}) — continuing training anyway", flush=True)
 
     import glob
     ckpts = sorted(glob.glob(f"{cfg['training']['output_dir']}/checkpoint-*"))
