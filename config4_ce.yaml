@@ -36,16 +36,17 @@ generation:
 training:
   learning_rate: 3.0e-6
   max_grad_norm: 1.0
-  kl_coef: 0.005          
+  kl_coef: 0 #         
   per_device_train_batch_size: 1
-  gradient_accumulation_steps: 256
-  steps_per_generation: 8
-  save_steps: 20
+  #gradient_accumulation_steps: 256
+  #steps_per_generation: 8
+  gradient_accumulation_steps: 8
+  save_steps: 200
   save_total_limit: 3
-  eval_steps: 20
-  #gradient_accumulation_steps: 8
+  eval_steps: 200
+
   num_train_epochs: 1
-  max_steps: 10000
+  max_steps: 5000
   warmup_steps: 20
   #warmup_ratio: 0.1
   #lr_scheduler_type: cosine  
@@ -61,7 +62,7 @@ reward:
   token_level: false
   answer_only_cme: false
   #answer_weight: 0.5
-  no_box_penalty: 2
+  no_box_penalty: 5
   # reward_metric options:
   #   entropy            — cross-entropy -log p(label) in nats (misnamed; default)
   #   perplexity         — exp(CE)
