@@ -43,7 +43,7 @@ training:
 
 reward:
   max_verifier_length: 3072
-  token_level: false
+  token_level: true
   answer_only_cme: false
   #no_box_penalty: 5
   reward_metric: entropy
