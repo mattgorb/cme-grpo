@@ -46,11 +46,14 @@ def build_train_dataset(cfg: dict):
 class GradientStepPrintCallback(TrainerCallback):
     """Print a line every time the optimizer updates weights (once per global_step)."""
     def on_step_end(self, args, state, control, **kwargs):
-        n_prompts = args.per_device_train_batch_size * args.gradient_accumulation_steps
+        # grad_accum × per_device_bs counts (prompt × generation) SAMPLES, not unique prompts.
+        # In GRPO each unique prompt is replicated num_generations times for group-relative advantage.
+        total_samples = args.per_device_train_batch_size * args.gradient_accumulation_steps
+        unique_prompts = total_samples // args.num_generations
         print(
             f"[grad-update] step={state.global_step} "
-            f"prompts_this_step={n_prompts} "
-            f"completions_this_step={n_prompts * args.num_generations}",
+            f"unique_prompts={unique_prompts} "
+            f"total_completions={total_samples}",
             flush=True,
         )
         return control
