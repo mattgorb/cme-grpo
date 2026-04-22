@@ -38,7 +38,8 @@ training:
   max_grad_norm: 1.0
   kl_coef: 0.02
   per_device_train_batch_size: 1
-  gradient_accumulation_steps: 8
+  gradient_accumulation_steps: 128
+  steps_per_generation: 8
   num_train_epochs: 1
   max_steps: 5000
   warmup_steps: 20
@@ -47,7 +48,7 @@ training:
   save_total_limit: 3
   eval_steps: 200
   skip_baseline_eval: true
-  output_dir: ./outputs/cme-grpo-config3
+  output_dir: ./outputs/cme-grpo-config3b
   bf16: true
   seed: 42
 
@@ -64,4 +65,4 @@ eval:
 
 wandb:
   project: cme-grpo
-  run_name: config3
+  run_name: config3b

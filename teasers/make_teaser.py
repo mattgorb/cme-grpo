@@ -252,13 +252,13 @@ def plot_qualitative_example(ax) -> None:
 
     # Problem header.
     ax.text(0.5, 0.96, problem_text, ha="center", va="top",
-            fontsize=14, fontweight="bold")
+            fontsize=11, fontweight="bold")
 
     def _draw_row(y, mark, mark_color, expr, ce_g, ce_v):
         # Response text on the left: marker hangs further left of the expression.
-        ax.text(-0.08, y, mark, fontsize=16, fontweight="bold",
+        ax.text(-0.08, y, mark, fontsize=13, fontweight="bold",
                 color=mark_color, va="center", clip_on=False)
-        ax.text(0.05, y, expr, fontsize=13, va="center")
+        ax.text(0.05, y, expr, fontsize=10, va="center")
 
         # Fork: single trunk splits into two branches (gen above, ver below).
         fork_x = 0.56
@@ -277,18 +277,18 @@ def plot_qualitative_example(ax) -> None:
                     xycoords="axes fraction",
                     arrowprops=dict(arrowstyle="->", lw=1.0, color=c_gen))
         ax.text(0.65, y_u + 0.025, "generator", ha="center", va="bottom",
-                fontsize=12, color=c_gen, fontweight="bold")
+                fontsize=9, color=c_gen, fontweight="bold")
         ax.text(0.76, y_u, f"CE = {ce_g:.1f}", ha="left", va="center",
-                fontsize=14, fontweight="bold", color=c_gen)
+                fontsize=11, fontweight="bold", color=c_gen)
 
         # Ver branch (bottom).
         ax.annotate("", xy=(0.74, y_d), xytext=(fork_x, y_d),
                     xycoords="axes fraction",
                     arrowprops=dict(arrowstyle="->", lw=1.0, color=c_ver))
         ax.text(0.65, y_d - 0.04, "verifier", ha="center", va="top",
-                fontsize=12, color=c_ver, fontweight="bold")
+                fontsize=9, color=c_ver, fontweight="bold")
         ax.text(0.76, y_d, f"CE = {ce_v:.1f}", ha="left", va="center",
-                fontsize=14, fontweight="bold", color=c_ver)
+                fontsize=11, fontweight="bold", color=c_ver)
 
     _draw_row(0.67, "A)", c_ok, expr_a, ce_gen_a, ce_ver_a)
     _draw_row(0.30, "B)", c_bad, expr_b, ce_gen_b, ce_ver_b)
@@ -303,7 +303,7 @@ def plot_qualitative_example(ax) -> None:
         f"$\\Delta$CE$_{{\\,\\rm gen}}$ = {gap_gen:.1f}  (ambiguous)"
         " | "
         f"$\\Delta$CE$_{{\\,\\rm ver}}$ = {gap_ver:.1f}  (separates)",
-        ha="center", fontsize=13, style="italic",
+        ha="center", fontsize=10, style="italic",
     )
 
 
@@ -385,7 +385,7 @@ def paper_figure(
     from matplotlib.gridspec import GridSpec
     fig = plt.figure(figsize=(13, 4.0))
     gs = GridSpec(2, 3, figure=fig,
-                  width_ratios=[0.95, 1.0, 0.8], hspace=0.5, wspace=0.3)
+                  width_ratios=[1, 1, 1], hspace=0.5, wspace=0.32)
     ax_a = fig.add_subplot(gs[:, 0])       # qualitative example, spans rows
     ax_b = fig.add_subplot(gs[:, 1])       # AUROC bar chart, spans rows
     ax_c_top = fig.add_subplot(gs[0, 2])   # gen density

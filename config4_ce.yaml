@@ -1,7 +1,7 @@
 
 #
 model:
-  generator: meta-llama/Llama-3.2-1B-Instruct
+  generator: meta-llama/Llama-3.2-1B
   #verifier: Qwen/Qwen2.5-Math-7B
   verifier: Qwen/Qwen2.5-Math-7B-Instruct
 
@@ -36,32 +36,48 @@ generation:
 training:
   learning_rate: 1.0e-6
   max_grad_norm: 1.0
-  kl_coef: 0.02
+  kl_coef: 0 #         
   per_device_train_batch_size: 1
-  gradient_accumulation_steps: 8
-  num_train_epochs: 1
-  max_steps: 5000
-  warmup_steps: 20
-  logging_steps: 1
+  #gradient_accumulation_steps: 256
+  #steps_per_generation: 8
+  gradient_accumulation_steps: 16
   save_steps: 200
   save_total_limit: 3
   eval_steps: 200
+
+  num_train_epochs: 1
+  max_steps: 7500
+  warmup_steps: 20
+  #warmup_ratio: 0.1
+  #lr_scheduler_type: cosine  
+  logging_steps: 1
+
   skip_baseline_eval: true
-  output_dir: ./outputs/cme-grpo-config3
+  output_dir: ./outputs/cme-grpo-config4
   bf16: true
   seed: 42
 
 reward:
   max_verifier_length: 3072
   token_level: false
-  answer_only_cme: true
+  answer_only_cme: false
+  #answer_weight: 0.5
   no_box_penalty: 5
+  # reward_metric options:
+  #   entropy            — cross-entropy -log p(label) in nats (misnamed; default)
+  #   perplexity         — exp(CE)
+  #   predictive_entropy — -sum_v p_v log p_v over vocab (label-free uncertainty)
+  # reward_metric: predictive_entropy
+  # answer_weight: float in [0, 1]. When set, overrides answer_only_cme and uses
+  #   r = -[(1-w)*mean(CE over full response) + w*mean(CE over \boxed{} span)]
+  #   0.0 = full only, 1.0 = answer only, 0.5 = equal weighting.
+
 
 eval:
   max_new_tokens: 3072
   temperature: 0.0
-  batch_size: 2
+  batch_size: 8
 
 wandb:
   project: cme-grpo
-  run_name: config3
+  run_name: config4-ce
