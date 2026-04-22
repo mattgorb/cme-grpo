@@ -242,6 +242,17 @@ class LLMJudgeEvalCallback(TrainerCallback):
         self.best_winrate = -1.0
         self.best_dir = os.path.join(cfg["training"]["output_dir"], "checkpoint-best")
 
+        # Pick 5 sample indices up-front so we track the same prompts across
+        # every eval round (not re-randomized each time). Seed it so runs are
+        # reproducible across restarts.
+        n = len(eval_instructions)
+        rng = random.Random(cfg.get("training", {}).get("seed", 42))
+        self.sample_indices = rng.sample(range(n), k=min(5, n))
+        self.samples_dir = os.path.join(
+            cfg["training"]["output_dir"], "eval_samples"
+        )
+        os.makedirs(self.samples_dir, exist_ok=True)
+
     def on_step_end(self, args, state, control, **kwargs):
         if state.global_step == 0 or state.global_step % self.eval_steps != 0:
             return control
@@ -305,15 +316,37 @@ class LLMJudgeEvalCallback(TrainerCallback):
                         f"winrate_vs_instruct={vs_instruct['winrate_a']:.4f}\n"
                     )
 
-            # Print a few side-by-side samples.
+            # Save 5 full prompt+generation triples (base / finetuned / instruct)
+            # to a JSON file for this eval round, and also print them.
+            samples = []
+            for idx in self.sample_indices:
+                samples.append({
+                    "index": idx,
+                    "instruction": self.eval_instructions[idx],
+                    "base_response": self.base_responses[idx],
+                    "finetuned_response": ft_responses[idx],
+                    "instruct_response": self.instruct_responses[idx],
+                })
+            sample_file = os.path.join(
+                self.samples_dir, f"step_{state.global_step:05d}.json"
+            )
+            import json as _json
+            with open(sample_file, "w", encoding="utf-8") as f:
+                _json.dump(
+                    {"step": state.global_step, "samples": samples},
+                    f, indent=2, ensure_ascii=False,
+                )
+            print(f"[step {state.global_step}] wrote {len(samples)} full samples → {sample_file}")
+
             print(f"\n{'=' * 70}")
-            print(f"[step {state.global_step}] SAMPLE COMPARISONS (3 prompts)")
+            print(f"[step {state.global_step}] SAMPLE COMPARISONS ({len(samples)} prompts, full text)")
             print(f"{'=' * 70}")
-            for i in range(min(3, len(self.eval_instructions))):
-                print(f"\n--- Prompt {i+1}: {self.eval_instructions[i][:100]}...")
-                print(f"  BASE:      {self.base_responses[i][:300]}...")
-                print(f"  FINETUNED: {ft_responses[i][:300]}...")
-                print(f"  INSTRUCT:  {self.instruct_responses[i][:300]}...")
+            for s in samples:
+                print(f"\n--- Prompt (idx={s['index']}) ---")
+                print(f"INSTRUCTION:\n{s['instruction']}\n")
+                print(f"BASE:\n{s['base_response']}\n")
+                print(f"FINETUNED:\n{s['finetuned_response']}\n")
+                print(f"INSTRUCT:\n{s['instruct_response']}\n")
         finally:
             if was_training:
                 model.train()
