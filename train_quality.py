@@ -541,35 +541,80 @@ def main():
     eval_max_tokens = cfg.get("eval", {}).get("max_new_tokens", 2048)
     gen_device = "cuda:0" if torch.cuda.is_available() else "cpu"
 
-    print("\nLoading eval prompts from UltraFeedback...")
-    eval_ds = load_dataset(cfg["data"]["train_dataset"], split="train")
-    eval_ds = eval_ds.shuffle(seed=99).select(range(judge_num_samples))
-    eval_instructions = [
-        ex.get("instruction", ex.get("prompt", "")) for ex in eval_ds
-    ]
-    eval_prompts = [format_prompt(inst, tokenizer) for inst in eval_instructions]
-
-    print("Caching baseline model responses for LLM judge eval...")
     base_name = cfg["model"]["base"]
     instruct_name = cfg["model"]["instruct"]
 
-    # Cache base model responses (the generator before training).
-    model.to(gen_device)
-    model.eval()
-    tokenizer.padding_side = "left"
-    base_responses = _generate_responses(model, tokenizer, eval_prompts, gen_device, eval_max_tokens)
-    print(f"  cached {len(base_responses)} base responses")
+    # ── Disk cache for eval prompts + base/instruct responses ──
+    # Regeneration across restarts wastes ~10-20 min. Cache keyed to settings
+    # that would change what's generated; invalidates automatically.
+    import json as _json
+    os.makedirs(cfg["training"]["output_dir"], exist_ok=True)
+    cache_path = os.path.join(cfg["training"]["output_dir"], "eval_cache.json")
+    cache_key = {
+        "dataset": cfg["data"]["train_dataset"],
+        "n_samples": judge_num_samples,
+        "shuffle_seed": 99,
+        "base_model": base_name,
+        "instruct_model": instruct_name,
+        "max_new_tokens": eval_max_tokens,
+    }
 
-    # Cache instruct model responses (loaded separately, then unloaded).
-    # Format prompts with instruct model's tokenizer (may have chat template).
-    instruct_tokenizer = AutoTokenizer.from_pretrained(instruct_name)
-    if instruct_tokenizer.pad_token is None:
-        instruct_tokenizer.pad_token = instruct_tokenizer.eos_token
-    instruct_prompts = [format_prompt(inst, instruct_tokenizer) for inst in eval_instructions]
-    instruct_responses = _cache_model_responses(
-        instruct_name, instruct_prompts, gen_device, eval_max_tokens,
-    )
-    print(f"  cached {len(instruct_responses)} instruct responses\n")
+    cached = None
+    if os.path.exists(cache_path):
+        try:
+            with open(cache_path, "r", encoding="utf-8") as f:
+                c = _json.load(f)
+            if c.get("key") == cache_key:
+                cached = c
+                print(f"\n[eval cache] loaded {cache_path} (skipping base + instruct generation)", flush=True)
+            else:
+                print(f"\n[eval cache] key mismatch — regenerating", flush=True)
+        except Exception as e:
+            print(f"\n[eval cache] failed to load ({e}) — regenerating", flush=True)
+
+    if cached is not None:
+        eval_instructions  = cached["instructions"]
+        eval_prompts       = cached["prompts"]
+        base_responses     = cached["base_responses"]
+        instruct_responses = cached["instruct_responses"]
+    else:
+        print("\nLoading eval prompts from UltraFeedback...", flush=True)
+        eval_ds = load_dataset(cfg["data"]["train_dataset"], split="train")
+        eval_ds = eval_ds.shuffle(seed=99).select(range(judge_num_samples))
+        eval_instructions = [
+            ex.get("instruction", ex.get("prompt", "")) for ex in eval_ds
+        ]
+        eval_prompts = [format_prompt(inst, tokenizer) for inst in eval_instructions]
+
+        print("Caching baseline model responses for LLM judge eval...", flush=True)
+
+        # Base model = the generator before training.
+        model.to(gen_device)
+        model.eval()
+        tokenizer.padding_side = "left"
+        base_responses = _generate_responses(model, tokenizer, eval_prompts, gen_device, eval_max_tokens)
+        print(f"  cached {len(base_responses)} base responses", flush=True)
+
+        # Instruct model (loaded separately, then unloaded).
+        instruct_tokenizer = AutoTokenizer.from_pretrained(instruct_name)
+        if instruct_tokenizer.pad_token is None:
+            instruct_tokenizer.pad_token = instruct_tokenizer.eos_token
+        instruct_prompts = [format_prompt(inst, instruct_tokenizer) for inst in eval_instructions]
+        instruct_responses = _cache_model_responses(
+            instruct_name, instruct_prompts, gen_device, eval_max_tokens,
+        )
+        print(f"  cached {len(instruct_responses)} instruct responses\n", flush=True)
+
+        # Persist.
+        with open(cache_path, "w", encoding="utf-8") as f:
+            _json.dump({
+                "key": cache_key,
+                "instructions": eval_instructions,
+                "prompts": eval_prompts,
+                "base_responses": base_responses,
+                "instruct_responses": instruct_responses,
+            }, f, ensure_ascii=False)
+        print(f"[eval cache] saved to {cache_path}\n", flush=True)
 
     eval_callback = LLMJudgeEvalCallback(
         cfg=cfg,
