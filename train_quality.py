@@ -603,11 +603,16 @@ def main():
         except Exception as e:
             print(f"  [WARN] baseline judge eval failed ({type(e).__name__}: {e}) — continuing training anyway", flush=True)
 
-    import glob
-    ckpts = sorted(glob.glob(f"{cfg['training']['output_dir']}/checkpoint-*"))
+    import glob, re
+    def _resume_step(p):
+        m = re.match(r"checkpoint-(\d+)$", os.path.basename(p))
+        return int(m.group(1)) if m else -1
+    ckpts = [p for p in glob.glob(f"{cfg['training']['output_dir']}/checkpoint-*")
+             if _resume_step(p) >= 0]  # excludes "checkpoint-best"
+    ckpts.sort(key=_resume_step)
     resume_ckpt = ckpts[-1] if ckpts else None
     if resume_ckpt:
-        print(f"Resuming from {resume_ckpt}")
+        print(f"Resuming from {resume_ckpt}", flush=True)
     trainer.train(resume_from_checkpoint=resume_ckpt)
     trainer.save_model(cfg["training"]["output_dir"])
 
