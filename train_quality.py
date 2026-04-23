@@ -160,12 +160,15 @@ def _judge_pairwise(
 ) -> dict:
     """Use an LLM judge to compare two sets of responses pairwise.
 
-    Returns dict with wins_a, wins_b, ties, winrate_a, winrate_b.
+    Returns aggregate win counts plus a `per_sample` list with one record per
+    instruction: {index, winner, reason}. The judge is prompted to emit both a
+    verdict and a 1-2 sentence justification.
     """
     from openai import OpenAI
     client = OpenAI()
 
     wins_a, wins_b, ties = 0, 0, 0
+    per_sample: list[dict] = []
 
     for i, (instruction, resp_a, resp_b) in enumerate(zip(instructions, responses_a, responses_b)):
         # Randomize presentation order to mitigate position bias.
@@ -182,20 +185,45 @@ def _judge_pairwise(
             f"RESPONSE A:\n{first[:2000]}\n\n"
             f"RESPONSE B:\n{second[:2000]}\n\n"
             "Which response is better? Consider helpfulness, accuracy, depth, and clarity.\n"
-            "Respond with ONLY one of: \"A\", \"B\", or \"TIE\"."
+            "Respond in EXACTLY this format (one line each, no extra text):\n"
+            "WINNER: <A | B | TIE>\n"
+            "REASON: <one or two sentences>\n"
         )
 
+        raw = ""
+        verdict = "TIE"
+        reason = ""
         try:
             response = client.chat.completions.create(
                 model=judge_model,
                 messages=[{"role": "user", "content": judge_prompt}],
-                max_completion_tokens=5,
+                max_completion_tokens=200,
                 temperature=0,
             )
-            verdict = response.choices[0].message.content.strip().upper()
+            raw = (response.choices[0].message.content or "").strip()
+            # Parse WINNER and REASON lines (tolerant of casing / stray text).
+            for line in raw.splitlines():
+                s = line.strip()
+                if s.upper().startswith("WINNER:"):
+                    tok = s.split(":", 1)[1].strip().upper()
+                    if tok.startswith("A"):
+                        verdict = "A"
+                    elif tok.startswith("B"):
+                        verdict = "B"
+                    else:
+                        verdict = "TIE"
+                elif s.upper().startswith("REASON:"):
+                    reason = s.split(":", 1)[1].strip()
+            # If the judge didn't format but did emit A/B/TIE, fall back.
+            if verdict == "TIE" and not reason:
+                head = raw.strip().upper()[:3]
+                if head.startswith("A"):
+                    verdict = "A"
+                elif head.startswith("B"):
+                    verdict = "B"
         except Exception as e:
             print(f"  Judge error: {e}")
-            verdict = "TIE"
+            reason = f"(judge error: {type(e).__name__}: {e})"
 
         if verdict == "A":
             winner = "a" if order == "ab" else "b"
@@ -204,9 +232,7 @@ def _judge_pairwise(
         else:
             winner = "tie"
 
-        winner_label = {
-            "a": label_a, "b": label_b, "tie": "TIE",
-        }[winner]
+        winner_label = {"a": label_a, "b": label_b, "tie": "TIE"}[winner]
         print(f"    [{i+1}/{len(instructions)}] winner={winner_label} | {instruction[:70]}")
 
         if winner == "a":
@@ -216,11 +242,22 @@ def _judge_pairwise(
         else:
             ties += 1
 
+        per_sample.append({
+            "index": i,
+            "winner": winner,          # 'a' | 'b' | 'tie' in terms of label_a/label_b
+            "winner_label": winner_label,
+            "order_shown": order,       # "ab" = label_a shown first, "ba" = reversed
+            "verdict": verdict,         # what the judge replied (A/B/TIE in shown order)
+            "reason": reason,
+            "raw": raw,
+        })
+
     total = wins_a + wins_b + ties
     return {
         "wins_a": wins_a, "wins_b": wins_b, "ties": ties, "total": total,
         "winrate_a": wins_a / total if total else 0,
         "winrate_b": wins_b / total if total else 0,
+        "per_sample": per_sample,
     }
 
 
@@ -254,12 +291,8 @@ class LLMJudgeEvalCallback(TrainerCallback):
         self.best_winrate = -1.0
         self.best_dir = os.path.join(cfg["training"]["output_dir"], "checkpoint-best")
 
-        # Pick 5 sample indices up-front so we track the same prompts across
-        # every eval round (not re-randomized each time). Seed it so runs are
-        # reproducible across restarts.
-        n = len(eval_instructions)
-        rng = random.Random(cfg.get("training", {}).get("seed", 42))
-        self.sample_indices = rng.sample(range(n), k=min(5, n))
+        # Save ALL eval prompts (not a subset).
+        self.sample_indices = list(range(len(eval_instructions)))
         self.samples_dir = os.path.join(
             cfg["training"]["output_dir"], "eval_samples"
         )
@@ -336,17 +369,31 @@ class LLMJudgeEvalCallback(TrainerCallback):
                         f"winrate_vs_instruct={vs_instruct['winrate_a']:.4f}\n"
                     )
 
-            # Save 5 full prompt+generation triples (base / finetuned / instruct)
-            # to a JSON file for this eval round, and also print them.
+            # Build per-sample records joining responses + judge verdicts/reasons.
+            vs_base_per = {r["index"]: r for r in vs_base.get("per_sample", [])}
+            vs_ins_per  = {r["index"]: r for r in vs_instruct.get("per_sample", [])}
+
             samples = []
             for idx in self.sample_indices:
+                judge_vs_base = vs_base_per.get(idx, {})
+                judge_vs_ins  = vs_ins_per.get(idx, {})
                 samples.append({
                     "index": idx,
                     "instruction": self.eval_instructions[idx],
                     "base_response": self.base_responses[idx],
                     "finetuned_response": ft_responses[idx],
                     "instruct_response": self.instruct_responses[idx],
+                    "judge_finetuned_vs_base": {
+                        "winner": judge_vs_base.get("winner_label", ""),
+                        "reason": judge_vs_base.get("reason", ""),
+                    },
+                    "judge_finetuned_vs_instruct": {
+                        "winner": judge_vs_ins.get("winner_label", ""),
+                        "reason": judge_vs_ins.get("reason", ""),
+                    },
                 })
+
+            # JSON (machine-readable).
             sample_file = os.path.join(
                 self.samples_dir, f"step_{state.global_step:05d}.json"
             )
@@ -356,17 +403,39 @@ class LLMJudgeEvalCallback(TrainerCallback):
                     {"step": state.global_step, "samples": samples},
                     f, indent=2, ensure_ascii=False,
                 )
-            print(f"[step {state.global_step}] wrote {len(samples)} full samples → {sample_file}")
 
-            print(f"\n{'=' * 70}")
-            print(f"[step {state.global_step}] SAMPLE COMPARISONS ({len(samples)} prompts, full text)")
-            print(f"{'=' * 70}")
-            for s in samples:
-                print(f"\n--- Prompt (idx={s['index']}) ---")
-                print(f"INSTRUCTION:\n{s['instruction']}\n")
-                print(f"BASE:\n{s['base_response']}\n")
-                print(f"FINETUNED:\n{s['finetuned_response']}\n")
-                print(f"INSTRUCT:\n{s['instruct_response']}\n")
+            # Markdown (human-readable — real newlines, no \n escapes).
+            md_file = os.path.join(
+                self.samples_dir, f"step_{state.global_step:05d}.md"
+            )
+            with open(md_file, "w", encoding="utf-8") as f:
+                f.write(f"# Eval samples — step {state.global_step}\n\n")
+                f.write(
+                    f"Aggregate: **finetuned vs base** "
+                    f"winrate = {vs_base['winrate_a']:.1%} "
+                    f"({vs_base['wins_a']}W / {vs_base['wins_b']}L / {vs_base['ties']}T)  ·  "
+                    f"**finetuned vs instruct** "
+                    f"winrate = {vs_instruct['winrate_a']:.1%} "
+                    f"({vs_instruct['wins_a']}W / {vs_instruct['wins_b']}L / {vs_instruct['ties']}T)\n\n"
+                )
+                f.write("---\n\n")
+                for s in samples:
+                    f.write(f"## Sample {s['index']}\n\n")
+                    f.write(f"### Instruction\n\n{s['instruction']}\n\n")
+                    f.write(f"### Base response\n\n{s['base_response']}\n\n")
+                    f.write(f"### Finetuned response\n\n{s['finetuned_response']}\n\n")
+                    f.write(f"### Instruct response\n\n{s['instruct_response']}\n\n")
+                    jb = s["judge_finetuned_vs_base"]
+                    ji = s["judge_finetuned_vs_instruct"]
+                    f.write(f"### Judge: finetuned vs base\n\n")
+                    f.write(f"- **Winner**: {jb['winner']}\n")
+                    f.write(f"- **Reason**: {jb['reason']}\n\n")
+                    f.write(f"### Judge: finetuned vs instruct\n\n")
+                    f.write(f"- **Winner**: {ji['winner']}\n")
+                    f.write(f"- **Reason**: {ji['reason']}\n\n")
+                    f.write("---\n\n")
+
+            print(f"[step {state.global_step}] wrote {len(samples)} samples → {sample_file} and {md_file}", flush=True)
         finally:
             if was_training:
                 model.train()
