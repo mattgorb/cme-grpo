@@ -20,7 +20,7 @@ data:
 generation:
   num_generations: 8
   temperature: 1.0
-  max_new_tokens: 3072
+  max_new_tokens: 2048
   top_p: 1.0
 
 training:
@@ -42,14 +42,14 @@ training:
   seed: 42
 
 reward:
-  max_verifier_length: 3072
+  max_verifier_length: 2048
   token_level: true
   answer_only_cme: false
   #no_box_penalty: 5
   reward_metric: entropy
 
 eval:
-  max_new_tokens: 3072
+  max_new_tokens: 2048
   batch_size: 4
   judge_model: gpt-5.2
   judge_num_samples: 50
