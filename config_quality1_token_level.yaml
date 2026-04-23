@@ -56,4 +56,4 @@ eval:
 
 wandb:
   project: cme-grpo
-  run_name: quality-qwen0.5b
+  run_name: quality-qwen0.5b-token-level
