@@ -253,10 +253,15 @@ def _judge_pairwise(
         })
 
     total = wins_a + wins_b + ties
+    # AlpacaEval-style winrate: ties count as half-wins for each side.
+    # This avoids collapsing "ties" into "losses" when many prompts are judged even.
     return {
         "wins_a": wins_a, "wins_b": wins_b, "ties": ties, "total": total,
-        "winrate_a": wins_a / total if total else 0,
-        "winrate_b": wins_b / total if total else 0,
+        "winrate_a": (wins_a + 0.5 * ties) / total if total else 0,
+        "winrate_b": (wins_b + 0.5 * ties) / total if total else 0,
+        # Also include the strict-wins-only fraction for reference.
+        "strict_winrate_a": wins_a / total if total else 0,
+        "strict_winrate_b": wins_b / total if total else 0,
         "per_sample": per_sample,
     }
 
