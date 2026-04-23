@@ -28,14 +28,14 @@ training:
   max_grad_norm: 1.0
   kl_coef: 0
   per_device_train_batch_size: 1
-  gradient_accumulation_steps: 128
+  gradient_accumulation_steps: 16
   num_train_epochs: 1
   max_steps: 5000
   warmup_steps: 20
   logging_steps: 1
-  save_steps: 10
+  save_steps: 100
   save_total_limit: 3
-  eval_steps: 10
+  eval_steps: 100
   skip_baseline_eval: false
   output_dir: ./outputs/cme-grpo-quality-qwen0.5b
   bf16: true
