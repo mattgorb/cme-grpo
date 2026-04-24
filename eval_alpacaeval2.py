@@ -63,6 +63,18 @@ def generate_for_model(
     label: str,
 ) -> list[str]:
     """Load a model, generate greedy responses on all instructions, unload, return."""
+    # If it looks like a local path (contains "/" or starts with "." or exists
+    # on disk), normalize to an absolute path so newer transformers versions
+    # don't misinterpret it as a HuggingFace repo ID.
+    if ("/" in model_name_or_path and not model_name_or_path.count("/") == 1) \
+            or model_name_or_path.startswith(".") \
+            or os.path.isdir(model_name_or_path):
+        model_name_or_path = os.path.abspath(model_name_or_path)
+        if not os.path.isdir(model_name_or_path):
+            raise FileNotFoundError(
+                f"Local checkpoint path not found: {model_name_or_path}\n"
+                "Check the directory exists and contains config.json + model weights."
+            )
     print(f"\n[{label}] Loading {model_name_or_path}", flush=True)
     tokenizer = AutoTokenizer.from_pretrained(model_name_or_path)
     if tokenizer.pad_token is None:
