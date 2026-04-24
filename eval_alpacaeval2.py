@@ -35,7 +35,6 @@ import time
 
 import torch
 import yaml
-from datasets import load_dataset
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 
@@ -174,11 +173,19 @@ def main():
     )
     os.makedirs(output_dir, exist_ok=True)
 
-    # Load AlpacaEval 2.0 prompts (805 instructions).
+    # Load AlpacaEval 2.0 prompts (805 instructions). Download the JSON file
+    # directly from HF — the dataset has a loading script that newer `datasets`
+    # versions reject.
     print("Loading AlpacaEval 2.0 prompts...", flush=True)
-    ds = load_dataset("tatsu-lab/alpaca_eval", "alpaca_eval", split="eval",
-                      trust_remote_code=True)
-    instructions = [ex["instruction"] for ex in ds]
+    from huggingface_hub import hf_hub_download
+    data_path = hf_hub_download(
+        repo_id="tatsu-lab/alpaca_eval",
+        filename="alpaca_eval.json",
+        repo_type="dataset",
+    )
+    with open(data_path, "r", encoding="utf-8") as f:
+        eval_records = json.load(f)
+    instructions = [ex["instruction"] for ex in eval_records]
     print(f"  loaded {len(instructions)} prompts", flush=True)
 
     # Models to generate for.
