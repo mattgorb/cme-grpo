@@ -293,15 +293,47 @@ class LLMJudgeEvalCallback(TrainerCallback):
         self.base_responses = base_responses
         self.instruct_responses = instruct_responses
         self.judge_model = cfg.get("eval", {}).get("judge_model", "gpt-5.2")
+        self.output_dir = cfg["training"]["output_dir"]
+        # Track best for each comparison separately; save to two distinct dirs.
+        self.best_vs_base = -1.0
+        self.best_vs_instruct = -1.0
+        self.best_vs_base_dir = os.path.join(self.output_dir, "checkpoint-best-vs-base")
+        self.best_vs_instruct_dir = os.path.join(self.output_dir, "checkpoint-best-vs-instruct")
+        # Aliases for backwards compatibility with code that referenced `best_dir`/`best_winrate`.
+        self.best_dir = self.best_vs_base_dir
         self.best_winrate = -1.0
-        self.best_dir = os.path.join(cfg["training"]["output_dir"], "checkpoint-best")
+        # Reference to the GRPOTrainer, set by main() after construction. Used to
+        # call trainer.save_model() which handles wrapping / accelerate correctly.
+        self.trainer = None
 
         # Save ALL eval prompts (not a subset).
         self.sample_indices = list(range(len(eval_instructions)))
-        self.samples_dir = os.path.join(
-            cfg["training"]["output_dir"], "eval_samples"
-        )
+        self.samples_dir = os.path.join(self.output_dir, "eval_samples")
         os.makedirs(self.samples_dir, exist_ok=True)
+
+    def _save_best_via_copy(self, target_dir: str, source_output_dir: str):
+        """Copy the most recent numeric checkpoint-N to target_dir.
+
+        More reliable than `model.save_pretrained` inside a callback because
+        the trainer's own save mechanism handles wrapped/DDP models correctly.
+        Returns the source path on success, None if no numeric checkpoint exists.
+        """
+        import re, glob, shutil
+        candidates = []
+        for d in glob.glob(os.path.join(source_output_dir, "checkpoint-*")):
+            if not os.path.isdir(d):
+                continue
+            m = re.match(r"checkpoint-(\d+)$", os.path.basename(d))
+            if m:
+                candidates.append((int(m.group(1)), d))
+        if not candidates:
+            return None
+        candidates.sort()
+        _, latest = candidates[-1]
+        if os.path.exists(target_dir):
+            shutil.rmtree(target_dir)
+        shutil.copytree(latest, target_dir)
+        return latest
 
     def on_step_end(self, args, state, control, **kwargs):
         if state.global_step == 0 or state.global_step % self.eval_steps != 0:
@@ -357,22 +389,85 @@ class LLMJudgeEvalCallback(TrainerCallback):
                     "eval/wins_vs_instruct": vs_instruct["wins_a"],
                 })
 
-            # Save best checkpoint based on win rate vs base.
-            if vs_base["winrate_a"] > self.best_winrate:
-                self.best_winrate = vs_base["winrate_a"]
-                print(f"[step {state.global_step}] new best winrate vs base: {vs_base['winrate_a']:.1%} — saving to {self.best_dir}")
-                import shutil
-                if os.path.exists(self.best_dir):
-                    shutil.rmtree(self.best_dir)
-                model.save_pretrained(self.best_dir)
-                if tokenizer is not None:
-                    tokenizer.save_pretrained(self.best_dir)
-                with open(os.path.join(self.best_dir, "best_info.txt"), "w") as f:
-                    f.write(
-                        f"step={state.global_step}\n"
-                        f"winrate_vs_base={vs_base['winrate_a']:.4f}\n"
-                        f"winrate_vs_instruct={vs_instruct['winrate_a']:.4f}\n"
-                    )
+            # Save best checkpoints for both metrics. Each is independently tracked
+            # and saved to its own directory, so both "best vs base" and
+            # "best vs instruct" are preserved.
+            def _save_best(metric_name, current_winrate, prev_best, target_dir):
+                if current_winrate <= prev_best:
+                    return prev_best  # no improvement
+                print(
+                    f"[step {state.global_step}] new best winrate vs {metric_name}: "
+                    f"{current_winrate:.1%} (prev {prev_best:.1%}) — saving to {target_dir}",
+                    flush=True,
+                )
+                # Strategy 1: trainer.save_model — handles wrapped/DDP models correctly,
+                # captures the CURRENT model state (no lag).
+                # Strategy 2 (fallback): copy the latest numeric checkpoint from disk.
+                save_method = None
+                source_info = ""
+                try:
+                    if self.trainer is not None and hasattr(self.trainer, "save_model"):
+                        import shutil
+                        if os.path.exists(target_dir):
+                            shutil.rmtree(target_dir)
+                        self.trainer.save_model(target_dir)
+                        save_method = "trainer.save_model"
+                        source_info = f"current model state at step {state.global_step}"
+                    else:
+                        src = self._save_best_via_copy(target_dir, self.output_dir)
+                        if src is None:
+                            print(f"  [WARN] trainer.save_model unavailable AND no "
+                                  f"numeric checkpoint to copy from. Skipping save "
+                                  f"(will retry next eval).", flush=True)
+                            return prev_best
+                        save_method = "copy-from-latest"
+                        source_info = f"copied from {src}"
+                except Exception as e:
+                    print(f"  [WARN] {save_method or 'trainer.save_model'} failed "
+                          f"({type(e).__name__}: {e}); trying copy-from-latest fallback", flush=True)
+                    try:
+                        src = self._save_best_via_copy(target_dir, self.output_dir)
+                        if src is None:
+                            print(f"  [ERROR] no numeric checkpoint exists yet to copy from. "
+                                  f"Skipping save (will retry next eval).", flush=True)
+                            return prev_best
+                        save_method = "copy-from-latest (fallback)"
+                        source_info = f"copied from {src}"
+                    except Exception as e2:
+                        print(f"  [ERROR] fallback copy also failed: "
+                              f"{type(e2).__name__}: {e2}", flush=True)
+                        import traceback
+                        traceback.print_exc()
+                        return prev_best
+
+                # Write best_info.txt and verify config.json exists.
+                try:
+                    with open(os.path.join(target_dir, "best_info.txt"), "w") as f:
+                        f.write(
+                            f"step={state.global_step}\n"
+                            f"metric=winrate_vs_{metric_name}\n"
+                            f"winrate_vs_base={vs_base['winrate_a']:.4f}\n"
+                            f"winrate_vs_instruct={vs_instruct['winrate_a']:.4f}\n"
+                            f"save_method={save_method}\n"
+                            f"source={source_info}\n"
+                        )
+                except Exception as e:
+                    print(f"  [WARN] couldn't write best_info.txt: {e}", flush=True)
+
+                cfg_path = os.path.join(target_dir, "config.json")
+                if os.path.exists(cfg_path):
+                    print(f"  → saved via {save_method} ({source_info}; config.json verified)", flush=True)
+                else:
+                    print(f"  [WARN] save claimed to succeed but {cfg_path} not found!", flush=True)
+                return current_winrate
+
+            self.best_vs_base = _save_best(
+                "base", vs_base["winrate_a"], self.best_vs_base, self.best_vs_base_dir,
+            )
+            self.best_vs_instruct = _save_best(
+                "instruct", vs_instruct["winrate_a"], self.best_vs_instruct, self.best_vs_instruct_dir,
+            )
+            self.best_winrate = self.best_vs_base  # keep alias in sync
 
             # Build per-sample records joining responses + judge verdicts/reasons.
             vs_base_per = {r["index"]: r for r in vs_base.get("per_sample", [])}
@@ -537,7 +632,7 @@ def main():
         beta=cfg["training"]["kl_coef"],
         max_grad_norm=cfg["training"].get("max_grad_norm", 1.0),
         gradient_checkpointing=True,
-        save_total_limit=1,
+        save_total_limit=cfg["training"].get("save_total_limit", 3),
         report_to=["wandb"],
     )
 
@@ -638,6 +733,10 @@ def main():
         train_dataset=train_ds,
         callbacks=[eval_callback],
     )
+    # Inject trainer reference so the callback can use trainer.save_model()
+    # which handles wrapped/DDP models correctly. Without this, the callback
+    # would fall back to copy-from-latest-checkpoint.
+    eval_callback.trainer = trainer
 
     # Run baseline judge eval before training. Non-fatal if judge API fails.
     if not cfg["training"].get("skip_baseline_eval", False):
