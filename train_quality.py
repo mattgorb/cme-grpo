@@ -297,8 +297,11 @@ class LLMJudgeEvalCallback(TrainerCallback):
         # Track best for each comparison separately; save to two distinct dirs.
         self.best_vs_base = -1.0
         self.best_vs_instruct = -1.0
-        self.best_vs_base_dir = os.path.join(self.output_dir, "checkpoint-best-vs-base")
-        self.best_vs_instruct_dir = os.path.join(self.output_dir, "checkpoint-best-vs-instruct")
+        # NOTE: avoid the "checkpoint-" prefix so HF Trainer's _rotate_checkpoints
+        # (which globs "checkpoint-*" with use_mtime=True) doesn't sweep these
+        # dirs into its save_total_limit cleanup.
+        self.best_vs_base_dir = os.path.join(self.output_dir, "best-vs-base")
+        self.best_vs_instruct_dir = os.path.join(self.output_dir, "best-vs-instruct")
         # Aliases for backwards compatibility with code that referenced `best_dir`/`best_winrate`.
         self.best_dir = self.best_vs_base_dir
         self.best_winrate = -1.0
