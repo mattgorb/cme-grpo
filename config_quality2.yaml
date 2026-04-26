@@ -20,11 +20,11 @@ data:
 generation:
   num_generations: 8
   temperature: 1.0
-  max_new_tokens: 3072
+  max_new_tokens: 2048
   top_p: 1.0
 
 training:
-  learning_rate: 3.0e-6
+  learning_rate: 5.0e-6
   max_grad_norm: 1.0
   kl_coef: 0
   per_device_train_batch_size: 1
@@ -37,23 +37,23 @@ training:
   save_total_limit: 3
   eval_steps: 10
   skip_baseline_eval: false
-  output_dir: ./outputs/cme-grpo-quality-llama3-lb
+  output_dir: ./outputs/cme-grpo-quality-llama3-1b
   bf16: true
   seed: 42
 
 reward:
-  max_verifier_length: 3072
+  max_verifier_length: 2048
   token_level: true
   answer_only_cme: false
   #no_box_penalty: 5
   reward_metric: entropy
 
 eval:
-  max_new_tokens: 3072
+  max_new_tokens: 2048
   batch_size: 4
   judge_model: gpt-5.2
   judge_num_samples: 50
 
 wandb:
   project: cme-grpo
-  run_name: quality-qwen0.5b
+  run_name: quality-llama3-1b
