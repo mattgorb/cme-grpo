@@ -135,20 +135,31 @@ def save_alpacaeval_json(path: str, generator_name: str,
     print(f"  saved {len(data)} outputs -> {path}", flush=True)
 
 
-def run_alpacaeval(outputs_path: str, name: str, output_dir: str) -> None:
-    """Invoke `alpaca_eval evaluate` on a JSON file and save leaderboard."""
+def run_alpacaeval(outputs_path: str, name: str, output_dir: str,
+                   annotators_config: str | None = None) -> None:
+    """Invoke `alpaca_eval evaluate` on a JSON file and save leaderboard.
+
+    `annotators_config` controls which judge model AlpacaEval uses. Common values:
+      - None (default): alpaca_eval_gpt4_turbo_fn (GPT-4-Turbo, ~$12/model, leaderboard-comparable)
+      - 'alpaca_eval_gpt4o_fn': GPT-4o
+      - 'alpaca_eval_gpt4o_mini_fn': GPT-4o-mini (~$1-2/model, less standard)
+      - 'claude_3_opus_evaluator': Claude 3 Opus
+    See `alpaca_eval/evaluators_configs/` in the package for all options.
+    """
     print(f"\n{'=' * 60}", flush=True)
     print(f"Running AlpacaEval 2.0 on: {outputs_path}", flush=True)
+    if annotators_config:
+        print(f"  annotators_config: {annotators_config}", flush=True)
     print(f"{'=' * 60}", flush=True)
+    cmd = [
+        "alpaca_eval", "evaluate",
+        "--model_outputs", outputs_path,
+        "--output_path", os.path.join(output_dir, f"{name}_leaderboard"),
+    ]
+    if annotators_config:
+        cmd += ["--annotators_config", annotators_config]
     try:
-        subprocess.run(
-            [
-                "alpaca_eval", "evaluate",
-                "--model_outputs", outputs_path,
-                "--output_path", os.path.join(output_dir, f"{name}_leaderboard"),
-            ],
-            check=True,
-        )
+        subprocess.run(cmd, check=True)
     except FileNotFoundError:
         print("ERROR: `alpaca_eval` CLI not found. Install with:")
         print("  pip install alpaca-eval")
@@ -172,6 +183,10 @@ def main():
     ap.add_argument("--max-new-tokens", type=int, default=2048)
     ap.add_argument("--batch-size", type=int, default=4)
     ap.add_argument("--device", default=None)
+    ap.add_argument("--annotators-config", default=None,
+                    help="AlpacaEval annotator name (judge model). "
+                         "Examples: alpaca_eval_gpt4_turbo_fn (default), "
+                         "alpaca_eval_gpt4o_fn, alpaca_eval_gpt4o_mini_fn")
     ap.add_argument("--name-prefix", default="",
                     help="Optional prefix for generator name in JSON (e.g. 'cme-grpo')")
     args = ap.parse_args()
@@ -240,7 +255,7 @@ def main():
         print("Set OPENAI_API_KEY to your key with credits.")
         print("=" * 60)
         for name, path in generated_paths:
-            run_alpacaeval(path, name, output_dir)
+            run_alpacaeval(path, name, output_dir, annotators_config=args.annotators_config)
         print("\nDone. Leaderboards written to", output_dir)
     else:
         print("\n[skip] --run-eval not passed. To evaluate manually:")
