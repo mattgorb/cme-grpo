@@ -155,6 +155,41 @@ def save_outputs_json(path: str, generator_name: str,
         json.dump(data, f, indent=2, ensure_ascii=False)
 
 
+def call_judge(judge_model: str, prompt: str, max_tokens: int = 200) -> str:
+    """Call OpenAI or Anthropic depending on the model name. Returns raw text.
+
+    Routing rule: model names starting with `gpt-` go to OpenAI;
+    names starting with `claude-` go to Anthropic.
+    """
+    if judge_model.startswith("gpt"):
+        from openai import OpenAI
+        client = OpenAI()
+        response = client.chat.completions.create(
+            model=judge_model,
+            messages=[{"role": "user", "content": prompt}],
+            max_completion_tokens=max_tokens,
+            temperature=0,
+        )
+        return (response.choices[0].message.content or "").strip()
+    elif judge_model.startswith("claude"):
+        import anthropic
+        client = anthropic.Anthropic()
+        response = client.messages.create(
+            model=judge_model,
+            max_tokens=max_tokens,
+            temperature=0,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        # Anthropic returns content as a list of blocks; concatenate text fields.
+        text_parts = [getattr(b, "text", "") for b in response.content]
+        return "".join(text_parts).strip()
+    else:
+        raise ValueError(
+            f"Unknown judge model prefix: {judge_model!r}. "
+            "Expected 'gpt-*' (OpenAI) or 'claude-*' (Anthropic)."
+        )
+
+
 def judge_pairwise(
     instructions: list[str],
     responses_a: list[str],
@@ -168,10 +203,8 @@ def judge_pairwise(
 
     Each prompt is shown to the judge with randomized A/B presentation order
     to mitigate position bias. Returns aggregate stats plus per-sample
-    verdicts and reasons.
+    verdicts and reasons. Routes to OpenAI or Anthropic based on `judge_model`.
     """
-    from openai import OpenAI
-    client = OpenAI()
 
     wins_a, wins_b, ties = 0, 0, 0
     per_sample: list[dict] = []
@@ -200,13 +233,7 @@ def judge_pairwise(
 
         raw, verdict, reason = "", "TIE", ""
         try:
-            response = client.chat.completions.create(
-                model=judge_model,
-                messages=[{"role": "user", "content": judge_prompt}],
-                max_completion_tokens=200,
-                temperature=0,
-            )
-            raw = (response.choices[0].message.content or "").strip()
+            raw = call_judge(judge_model, judge_prompt, max_tokens=200)
             for line in raw.splitlines():
                 s = line.strip()
                 if s.upper().startswith("WINNER:"):
@@ -295,8 +322,11 @@ def main():
     ap.add_argument("--num-samples", type=int, default=None,
                     help="If set, evaluate on a random sample of N prompts "
                          "(seeded by --seed). Default uses all 805 prompts.")
-    ap.add_argument("--judge-model", default="gpt-5.2",
-                    help="OpenAI model used as the LLM judge")
+    ap.add_argument("--judges", default="gpt-5.2,claude-sonnet-4-6",
+                    help="Comma-separated list of judge model IDs. "
+                         "Models starting with 'gpt-' route to OpenAI; "
+                         "models starting with 'claude-' route to Anthropic. "
+                         "Each judge produces its own results files.")
     ap.add_argument("--max-new-tokens", type=int, default=2048)
     ap.add_argument("--batch-size", type=int, default=8)
     ap.add_argument("--device", default=None)
@@ -325,7 +355,8 @@ def main():
     print(f"  finetuned:  {args.checkpoint}")
     print(f"  instruct:   {instruct_name}")
     print(f"  reference:  {ref_name}")
-    print(f"  judge:      {args.judge_model}")
+    judges = [j.strip() for j in args.judges.split(",") if j.strip()]
+    print(f"  judges:     {judges}")
     print(f"  output:     {output_dir}")
     print()
 
@@ -379,80 +410,105 @@ def main():
         ("instruct", "reference"),
     ]
 
-    all_results: dict[str, dict] = {}
-    for label_a, label_b in comparisons:
-        cmp_name = f"{label_a}_vs_{label_b}"
-        result_path = os.path.join(output_dir, f"judge_{cmp_name}.json")
-        if os.path.exists(result_path):
-            with open(result_path, "r", encoding="utf-8") as f:
-                all_results[cmp_name] = json.load(f)
-            print(f"\n[{cmp_name}] loaded cached judge results from {result_path}", flush=True)
-            continue
+    # ── Run pairwise comparisons for each judge ──
+    # Results keyed by (judge_model, comparison_name) -> result dict.
+    all_results: dict[tuple[str, str], dict] = {}
+    for judge_model in judges:
+        # Filename-safe slug for the judge (keeps hyphens, replaces dots/slashes).
+        judge_slug = judge_model.replace("/", "_").replace(".", "_")
+        for label_a, label_b in comparisons:
+            cmp_name = f"{label_a}_vs_{label_b}"
+            result_path = os.path.join(
+                output_dir, f"judge_{cmp_name}__{judge_slug}.json"
+            )
+            if os.path.exists(result_path):
+                with open(result_path, "r", encoding="utf-8") as f:
+                    all_results[(judge_model, cmp_name)] = json.load(f)
+                print(f"\n[{judge_model} | {cmp_name}] loaded cached results from {result_path}", flush=True)
+                continue
 
-        print(f"\n{'=' * 60}")
-        print(f"Judging: {cmp_name}")
-        print(f"{'=' * 60}", flush=True)
-        result = judge_pairwise(
-            instructions,
-            responses_by_label[label_a],
-            responses_by_label[label_b],
-            judge_model=args.judge_model,
-            label_a=label_a,
-            label_b=label_b,
-        )
-        with open(result_path, "w", encoding="utf-8") as f:
-            json.dump(result, f, indent=2, ensure_ascii=False)
-        print(f"[{cmp_name}] saved judge results -> {result_path}", flush=True)
-        all_results[cmp_name] = result
+            print(f"\n{'=' * 60}")
+            print(f"Judging ({judge_model}): {cmp_name}")
+            print(f"{'=' * 60}", flush=True)
+            result = judge_pairwise(
+                instructions,
+                responses_by_label[label_a],
+                responses_by_label[label_b],
+                judge_model=judge_model,
+                label_a=label_a,
+                label_b=label_b,
+            )
+            with open(result_path, "w", encoding="utf-8") as f:
+                json.dump(result, f, indent=2, ensure_ascii=False)
+            print(f"[{judge_model} | {cmp_name}] saved -> {result_path}", flush=True)
+            all_results[(judge_model, cmp_name)] = result
 
-    # ── Summary ──
-    print(f"\n{'=' * 70}")
-    print("SUMMARY (tie-adjusted win rate, judge = " + args.judge_model + ")")
-    print(f"{'=' * 70}")
-    print(f"{'Comparison (A vs B)':<35} {'A wins':>8} {'B wins':>8} {'Ties':>6} {'WR-A':>8} {'WR-B':>8}")
-    print("-" * 70)
-    for cmp_name, r in all_results.items():
-        print(
-            f"{cmp_name:<35} {r['wins_a']:>8} {r['wins_b']:>8} {r['ties']:>6} "
-            f"{r['winrate_a']:>7.1%} {r['winrate_b']:>7.1%}"
-        )
+    # ── Summary (per judge, then overall) ──
+    print(f"\n{'=' * 80}")
+    print("SUMMARY — tie-adjusted win rate")
+    print(f"{'=' * 80}")
+    for judge_model in judges:
+        print(f"\nJudge: {judge_model}")
+        print(f"{'Comparison (A vs B)':<35} {'A wins':>8} {'B wins':>8} {'Ties':>6} {'WR-A':>8} {'WR-B':>8}")
+        print("-" * 80)
+        for label_a, label_b in comparisons:
+            cmp_name = f"{label_a}_vs_{label_b}"
+            r = all_results.get((judge_model, cmp_name))
+            if r is None:
+                continue
+            print(
+                f"{cmp_name:<35} {r['wins_a']:>8} {r['wins_b']:>8} {r['ties']:>6} "
+                f"{r['winrate_a']:>7.1%} {r['winrate_b']:>7.1%}"
+            )
 
-    # ── Write summary CSV ──
+    # ── Write summary CSV (one row per judge × comparison) ──
     summary_path = os.path.join(output_dir, "summary.csv")
     with open(summary_path, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         w.writerow([
-            "comparison", "model_a", "model_b",
+            "judge", "comparison", "model_a", "model_b",
             "wins_a", "wins_b", "ties", "total",
             "winrate_a", "winrate_b",
             "strict_winrate_a", "strict_winrate_b",
         ])
-        for cmp_name, r in all_results.items():
-            w.writerow([
-                cmp_name, r["label_a"], r["label_b"],
-                r["wins_a"], r["wins_b"], r["ties"], r["total"],
-                f"{r['winrate_a']:.4f}", f"{r['winrate_b']:.4f}",
-                f"{r['strict_winrate_a']:.4f}", f"{r['strict_winrate_b']:.4f}",
-            ])
+        for judge_model in judges:
+            for label_a, label_b in comparisons:
+                cmp_name = f"{label_a}_vs_{label_b}"
+                r = all_results.get((judge_model, cmp_name))
+                if r is None:
+                    continue
+                w.writerow([
+                    judge_model,
+                    cmp_name, r["label_a"], r["label_b"],
+                    r["wins_a"], r["wins_b"], r["ties"], r["total"],
+                    f"{r['winrate_a']:.4f}", f"{r['winrate_b']:.4f}",
+                    f"{r['strict_winrate_a']:.4f}", f"{r['strict_winrate_b']:.4f}",
+                ])
     print(f"\nWrote summary -> {summary_path}")
 
-    # ── Sample-level markdown for manual inspection ──
+    # ── Sample-level markdown (organized by judge, then comparison) ──
     md_path = os.path.join(output_dir, "samples.md")
     with open(md_path, "w", encoding="utf-8") as f:
-        f.write(f"# Quality eval — judge = {args.judge_model}\n\n")
-        for cmp_name, r in all_results.items():
-            f.write(f"## {cmp_name}\n\n")
-            f.write(
-                f"- **A ({r['label_a']})**: {r['wins_a']} wins  · "
-                f"**B ({r['label_b']})**: {r['wins_b']} wins  · "
-                f"**Ties**: {r['ties']}  · "
-                f"**WR-A (tie-adjusted)**: {r['winrate_a']:.1%}\n\n"
-            )
-            for s in r.get("per_sample", [])[:10]:
-                f.write(f"### Sample {s['index']}: winner = {s['winner_label']}\n\n")
-                f.write(f"- **Instruction**: {s['instruction']}\n")
-                f.write(f"- **Reason**: {s['reason']}\n\n")
-            f.write("---\n\n")
+        f.write(f"# Quality eval — judges = {', '.join(judges)}\n\n")
+        for judge_model in judges:
+            f.write(f"# Judge: {judge_model}\n\n")
+            for label_a, label_b in comparisons:
+                cmp_name = f"{label_a}_vs_{label_b}"
+                r = all_results.get((judge_model, cmp_name))
+                if r is None:
+                    continue
+                f.write(f"## {cmp_name}\n\n")
+                f.write(
+                    f"- **A ({r['label_a']})**: {r['wins_a']} wins  · "
+                    f"**B ({r['label_b']})**: {r['wins_b']} wins  · "
+                    f"**Ties**: {r['ties']}  · "
+                    f"**WR-A (tie-adjusted)**: {r['winrate_a']:.1%}\n\n"
+                )
+                for s in r.get("per_sample", [])[:10]:
+                    f.write(f"### Sample {s['index']}: winner = {s['winner_label']}\n\n")
+                    f.write(f"- **Instruction**: {s['instruction']}\n")
+                    f.write(f"- **Reason**: {s['reason']}\n\n")
+                f.write("---\n\n")
     print(f"Wrote samples markdown -> {md_path}")
 
 
