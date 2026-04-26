@@ -290,8 +290,11 @@ def main():
                     help="Path to the trained CME-GRPO checkpoint")
     ap.add_argument("--output-dir", default=None,
                     help="Where to write outputs (default: <checkpoint>/quality_eval)")
-    ap.add_argument("--reference-model", default="google/gemma-3n-E2B-it",
-                    help="Tiny reference model for cross-comparison")
+    ap.add_argument("--reference-model", default="google/gemma-3-1b-it",
+                    help="Small reference model for cross-comparison")
+    ap.add_argument("--num-samples", type=int, default=None,
+                    help="If set, evaluate on a random sample of N prompts "
+                         "(seeded by --seed). Default uses all 805 prompts.")
     ap.add_argument("--judge-model", default="gpt-5.2",
                     help="OpenAI model used as the LLM judge")
     ap.add_argument("--max-new-tokens", type=int, default=2048)
@@ -329,6 +332,15 @@ def main():
     # ── Load prompts ──
     instructions = load_alpacaeval_prompts()
     print(f"Loaded {len(instructions)} AlpacaEval prompts")
+
+    # Optional random subsample (seeded for reproducibility).
+    if args.num_samples is not None and args.num_samples < len(instructions):
+        # Use a separate Random instance so this doesn't drain the global one
+        # used for judge order randomization.
+        sub_rng = random.Random(args.seed)
+        idx = sub_rng.sample(range(len(instructions)), k=args.num_samples)
+        instructions = [instructions[i] for i in idx]
+        print(f"Subsampled {len(instructions)} prompts (seed={args.seed})")
 
     # ── Generate responses for all four models ──
     models_to_generate = [
