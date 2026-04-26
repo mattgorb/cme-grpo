@@ -1,7 +1,7 @@
 
 #
 model:
-  generator: google/gemma-2-2b 
+  generator: google/gemma-3-1b-pt
   #verifier: Qwen/Qwen2.5-Math-7B
   verifier: Qwen/Qwen2.5-Math-7B-Instruct
 
