@@ -187,6 +187,11 @@ class CMERewardModel:
                     verifier_token_ce = torch.full_like(
                         verifier_token_ce, float(no_box_penalty)
                     )
+                elif not answer_only and _find_boxed_span(response) is None:
+                    # Mirror sequence-level behavior: when scoring the full response
+                    # and no \boxed{} is present, add the penalty to every token CE
+                    # so the completion is consistently penalized for missing format.
+                    verifier_token_ce = verifier_token_ce + float(no_box_penalty)
                 elif answer_span is not None:
                     # Zero out CE for verifier tokens outside the \boxed{...} span.
                     a, b = answer_span
