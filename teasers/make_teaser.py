@@ -386,53 +386,58 @@ def paper_figure(
     fig = plt.figure(figsize=(13, 4.0))
     gs = GridSpec(2, 3, figure=fig,
                   width_ratios=[1, 1, 1], hspace=0.5, wspace=0.32)
-    ax_a = fig.add_subplot(gs[:, 0])       # qualitative example, spans rows
-    ax_b = fig.add_subplot(gs[:, 1])       # AUROC bar chart, spans rows
+    ax_a = fig.add_subplot(gs[:, 0])       # AUROC bar chart, dataset 1
+    ax_b = fig.add_subplot(gs[:, 1])       # AUROC bar chart, dataset 2
     ax_c_top = fig.add_subplot(gs[0, 2])   # gen density
     ax_c_bot = fig.add_subplot(gs[1, 2])   # ver density
 
-    # ───────── Panel (a): qualitative example ─────────
-    plot_qualitative_example(ax_a)
-
-    # ───────── Panel (b): AUROC bar chart for one dataset ─────────
+    # Per-dataset model exclusions for the bar charts.
     bar_exclusions = {
         "math500": {"gemma-2-2b"},
     }
-    bench = bar_datasets[1] if len(bar_datasets) >= 2 else bar_datasets[0]
-    sub_b = stats[stats["benchmark"] == bench]
-    excluded = bar_exclusions.get(bench, set())
-    if excluded:
-        sub_b = sub_b[~sub_b["generator"].isin(excluded)]
-    sub_b = sub_b.sort_values("generator").reset_index(drop=True)
-    if sub_b.empty:
-        ax_b.text(0.5, 0.5, f"(no data for {bench})", transform=ax_b.transAxes,
-                  ha="center", va="center", fontsize=10, color="gray")
-        ax_b.set_xticks([])
-        ax_b.set_yticks([])
-        ax_b.set_title(bench, fontsize=10)
-    else:
-        x = np.arange(len(sub_b))
+
+    def _draw_bar_panel(ax, bench: str) -> None:
+        sub = stats[stats["benchmark"] == bench]
+        excluded = bar_exclusions.get(bench, set())
+        if excluded:
+            sub = sub[~sub["generator"].isin(excluded)]
+        sub = sub.sort_values("generator").reset_index(drop=True)
+        if sub.empty:
+            ax.text(0.5, 0.5, f"(no data for {bench})", transform=ax.transAxes,
+                    ha="center", va="center", fontsize=10, color="gray")
+            ax.set_xticks([])
+            ax.set_yticks([])
+            ax.set_title(bench, fontsize=10)
+            return
+        x = np.arange(len(sub))
         w = 0.38
-        ax_b.bar(x - w / 2, sub_b["ce_gen_answer_auroc"], w,
-                 color=c_gen, edgecolor="black", linewidth=0.6,
-                 label="generator self-CE")
-        ax_b.bar(x + w / 2, sub_b["ce_ver_answer_auroc"], w,
-                 color=c_ver, edgecolor="black", linewidth=0.6,
-                 label="verifier CE (CME)")
-        ax_b.axhline(0.5, color=c_chance, linestyle="--", linewidth=0.8, alpha=0.7)
-        ax_b.set_ylim(0.4, 1.0)
-        ax_b.set_xticks(x)
-        ax_b.set_xticklabels(sub_b["generator"], rotation=30, ha="right", fontsize=8)
-        ax_b.set_ylabel("AUROC (wrong $>$ correct)")
-        ax_b.set_title(bench, fontsize=11)
-        ax_b.grid(axis="y", alpha=0.25, linewidth=0.5)
-        for xi, v in zip(x - w / 2, sub_b["ce_gen_answer_auroc"]):
+        ax.bar(x - w / 2, sub["ce_gen_answer_auroc"], w,
+               color=c_gen, edgecolor="black", linewidth=0.6,
+               label="generator self-CE")
+        ax.bar(x + w / 2, sub["ce_ver_answer_auroc"], w,
+               color=c_ver, edgecolor="black", linewidth=0.6,
+               label="verifier CE (CME)")
+        ax.axhline(0.5, color=c_chance, linestyle="--", linewidth=0.8, alpha=0.7)
+        ax.set_ylim(0.4, 1.0)
+        ax.set_xticks(x)
+        ax.set_xticklabels(sub["generator"], rotation=30, ha="right", fontsize=8)
+        ax.set_ylabel("AUROC (wrong $>$ correct)")
+        ax.set_title(bench, fontsize=11)
+        ax.grid(axis="y", alpha=0.25, linewidth=0.5)
+        for xi, v in zip(x - w / 2, sub["ce_gen_answer_auroc"]):
             if not np.isnan(v):
-                ax_b.text(xi, v + 0.01, f"{v:.2f}", ha="center", va="bottom", fontsize=7)
-        for xi, v in zip(x + w / 2, sub_b["ce_ver_answer_auroc"]):
+                ax.text(xi, v + 0.01, f"{v:.2f}", ha="center", va="bottom", fontsize=7)
+        for xi, v in zip(x + w / 2, sub["ce_ver_answer_auroc"]):
             if not np.isnan(v):
-                ax_b.text(xi, v + 0.01, f"{v:.2f}", ha="center", va="bottom", fontsize=7)
-        ax_b.legend(loc="lower right", fontsize=8, frameon=True)
+                ax.text(xi, v + 0.01, f"{v:.2f}", ha="center", va="bottom", fontsize=7)
+
+    # Two bar charts on two datasets.
+    bench_a = bar_datasets[0] if len(bar_datasets) >= 1 else "math500"
+    bench_b = bar_datasets[1] if len(bar_datasets) >= 2 else "amc23"
+    _draw_bar_panel(ax_a, bench_a)
+    _draw_bar_panel(ax_b, bench_b)
+    # Show legend only on the first bar chart to avoid duplication.
+    ax_a.legend(loc="lower right", fontsize=8, frameon=True)
 
     # ───────── Panel (c): density plot ─────────
     # Use a single representative (generator, benchmark) pair so we don't blend
@@ -626,7 +631,7 @@ def main():
         bar_ds = tuple(args.bar_datasets.split(","))
         paper_figure(
             perrow_df_valid, stats,
-            os.path.join(args.output_dir, "teaser_paper.pdf"),
+            os.path.join(args.output_dir, "math_reasoning_motivation.pdf"),
             bar_datasets=bar_ds[:2] if len(bar_ds) >= 2 else ("math500", "amc23"),
         )
     else:
