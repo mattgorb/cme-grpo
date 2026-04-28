@@ -43,9 +43,9 @@ training:
   max_steps: 5000
   warmup_steps: 20
   logging_steps: 1
-  save_steps: 15
+  save_steps: 10
   save_total_limit: 3
-  eval_steps: 15
+  eval_steps: 10
   skip_baseline_eval: true
   output_dir: ./outputs/cme-grpo-config3
   bf16: true
