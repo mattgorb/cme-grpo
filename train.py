@@ -31,13 +31,22 @@ def load_config(path: str = "config.yaml") -> dict:
         return yaml.safe_load(f)
 
 
-def build_train_dataset(cfg: dict):
-    from eval import extract_boxed
+def build_train_dataset(cfg: dict, tokenizer=None):
+    from eval import extract_boxed, format_prompt
     ds = load_dataset(cfg["data"]["train_dataset"], split="train")
+
+    # Only switch to the tokenizer's chat-template format when one is actually
+    # defined; otherwise keep the raw template so base-model runs are unchanged.
+    use_chat_template = tokenizer is not None and tokenizer.chat_template is not None
 
     def _map(ex):
         gold = extract_boxed(ex.get("solution", "")) or ""
-        return {"prompt": PROMPT_TEMPLATE.format(problem=ex["problem"]), "gold_answer": gold}
+        prompt = (
+            format_prompt(ex["problem"], tokenizer)
+            if use_chat_template
+            else PROMPT_TEMPLATE.format(problem=ex["problem"])
+        )
+        return {"prompt": prompt, "gold_answer": gold}
 
     keep = {"problem", "gold_answer"}
     return ds.map(_map, remove_columns=[c for c in ds.column_names if c not in keep])
@@ -186,7 +195,7 @@ def main():
         answer_weight=answer_weight,
     )
 
-    train_ds = build_train_dataset(cfg)
+    train_ds = build_train_dataset(cfg, tokenizer)
 
     # TRL requires generation_batch_size (per_device * world * grad_accum) to be
     # divisible by num_generations. Auto-bump grad_accum so this always holds.
