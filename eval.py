@@ -22,13 +22,21 @@ CHAT_INSTRUCTION = (
 )
 
 
-def format_prompt(problem: str, tokenizer) -> str:
+def format_prompt(problem: str, tokenizer, fallback_tokenizer=None) -> str:
     if tokenizer.chat_template is not None:
         messages = [
             {"role": "user", "content": f"{CHAT_INSTRUCTION}\n\nProblem: {problem}"},
         ]
         return tokenizer.apply_chat_template(
             messages, tokenize=False, add_generation_prompt=True
+        )
+    # Generator is a base model with no chat template. If a fallback tokenizer
+    # (e.g. the verifier's) has one, use that so train/eval/verifier all see the
+    # same prompt distribution. Otherwise fall back to plain text.
+    if fallback_tokenizer is not None and fallback_tokenizer.chat_template is not None:
+        messages = [{"role": "user", "content": problem}]
+        return fallback_tokenizer.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True,
         )
     return PROMPT_TEMPLATE.format(problem=problem)
 
@@ -83,6 +91,7 @@ def evaluate(
     num_samples: int = 1,
     temperature: float = 0.0,
     debug: bool = False,
+    verifier_tokenizer=None,
 ) -> dict:
     model.eval()
     correct = 0
@@ -101,7 +110,7 @@ def evaluate(
         batch_problems = problems[i : i + batch_size]
         batch_answers = answers[i : i + batch_size]
 
-        prompts = [format_prompt(p, tokenizer) for p in batch_problems]
+        prompts = [format_prompt(p, tokenizer, verifier_tokenizer) for p in batch_problems]
         enc = tokenizer(
             prompts,
             return_tensors="pt",
@@ -150,7 +159,7 @@ def evaluate(
     return {"pass@1": acc, "correct": correct, "total": total}
 
 
-def evaluate_benchmark(model, tokenizer, bench: dict, cfg: dict, device: str, max_samples: int = 0, debug: bool = False) -> dict:
+def evaluate_benchmark(model, tokenizer, bench: dict, cfg: dict, device: str, max_samples: int = 0, debug: bool = False, verifier_tokenizer=None) -> dict:
     ds = load_dataset(bench["dataset"], split=bench["split"])
     # Per-benchmark num_test_samples in config overrides the caller's max_samples.
     n = int(bench.get("num_test_samples", 0)) or max_samples
@@ -166,13 +175,14 @@ def evaluate_benchmark(model, tokenizer, bench: dict, cfg: dict, device: str, ma
         batch_size=cfg["eval"]["batch_size"],
         device=device,
         debug=debug,
+        verifier_tokenizer=verifier_tokenizer,
     )
 
 
-def evaluate_all(model, tokenizer, cfg: dict, device: str, max_samples: int = 0, debug: bool = False) -> dict:
+def evaluate_all(model, tokenizer, cfg: dict, device: str, max_samples: int = 0, debug: bool = False, verifier_tokenizer=None) -> dict:
     results = {}
     for bench in cfg["benchmarks"]:
-        res = evaluate_benchmark(model, tokenizer, bench, cfg, device, max_samples=max_samples, debug=debug)
+        res = evaluate_benchmark(model, tokenizer, bench, cfg, device, max_samples=max_samples, debug=debug, verifier_tokenizer=verifier_tokenizer)
         results[bench["name"]] = res
         print(
             f"  {bench['name']}: pass@1 = {res['pass@1']:.4f} "

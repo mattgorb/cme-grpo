@@ -17,6 +17,29 @@ import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 
+_PLAIN_PROMPT_TEMPLATE = (
+    "Solve the following math problem. Put your final answer in \\boxed{{}}.\n\n"
+    "Problem: {problem}\n\nSolution:"
+)
+
+
+def _format_prompt_for_verifier(problem: str, verifier_tokenizer) -> str:
+    """Format a math problem under the verifier's expected prompt distribution.
+
+    If the verifier has a chat template (e.g. Qwen2.5-Math-Instruct, which
+    auto-injects "Please reason step by step, and put your final answer within
+    \\boxed{}" as the system prompt), use it. Otherwise fall back to the plain
+    template — base verifiers like Qwen2.5-Math-1.5B were trained on plain
+    text continuations.
+    """
+    if verifier_tokenizer is not None and verifier_tokenizer.chat_template is not None:
+        msgs = [{"role": "user", "content": problem}]
+        return verifier_tokenizer.apply_chat_template(
+            msgs, tokenize=False, add_generation_prompt=True,
+        )
+    return _PLAIN_PROMPT_TEMPLATE.format(problem=problem)
+
+
 def _find_boxed_span(text: str) -> Optional[tuple]:
     """Return (start, end) char offsets of the content inside the last \\boxed{...}.
 
@@ -360,6 +383,17 @@ def build_cme_reward_fn(
                 c = "\n".join(m.get("content", "") for m in c)
             prompt_texts.append(p)
             completion_texts.append(c)
+
+        # When the raw problem is available, re-format the prompt under the
+        # verifier's own template so the verifier sees its expected distribution
+        # (e.g. Qwen-Math's auto-injected math system prompt) rather than the
+        # generator-formatted prompt with foreign chat markers.
+        problems = kwargs.get("problem")
+        if problems is not None:
+            prompt_texts = [
+                _format_prompt_for_verifier(p, reward_model.tokenizer)
+                for p in problems
+            ]
 
         from eval import is_correct
         gold_answers = kwargs.get("gold_answer", [None] * len(completion_texts))

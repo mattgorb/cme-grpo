@@ -31,21 +31,19 @@ def load_config(path: str = "config.yaml") -> dict:
         return yaml.safe_load(f)
 
 
-def build_train_dataset(cfg: dict, tokenizer=None):
+def build_train_dataset(cfg: dict, tokenizer=None, verifier_tokenizer=None):
     from eval import extract_boxed, format_prompt
     ds = load_dataset(cfg["data"]["train_dataset"], split="train")
 
-    # Only switch to the tokenizer's chat-template format when one is actually
-    # defined; otherwise keep the raw template so base-model runs are unchanged.
-    use_chat_template = tokenizer is not None and tokenizer.chat_template is not None
-
+    # format_prompt picks: (1) generator's chat template if it has one,
+    # else (2) verifier's chat template as a fallback (so base generators
+    # train under the verifier's expected distribution), else (3) plain text.
     def _map(ex):
         gold = extract_boxed(ex.get("solution", "")) or ""
-        prompt = (
-            format_prompt(ex["problem"], tokenizer)
-            if use_chat_template
-            else PROMPT_TEMPLATE.format(problem=ex["problem"])
-        )
+        if tokenizer is not None:
+            prompt = format_prompt(ex["problem"], tokenizer, verifier_tokenizer)
+        else:
+            prompt = PROMPT_TEMPLATE.format(problem=ex["problem"])
         return {"prompt": prompt, "gold_answer": gold}
 
     keep = {"problem", "gold_answer"}
@@ -69,17 +67,18 @@ class GradientStepPrintCallback(TrainerCallback):
 
 
 class PeriodicEvalCallback(TrainerCallback):
-    def __init__(self, cfg: dict, eval_steps: int, baseline_samples=None):
+    def __init__(self, cfg: dict, eval_steps: int, baseline_samples=None, verifier_tokenizer=None):
         self.cfg = cfg
         self.eval_steps = eval_steps
         self.baseline_samples = baseline_samples or []  # list of (problem, gold, text)
+        self.verifier_tokenizer = verifier_tokenizer
         self.best_accuracy = -1.0
         self.best_dir = os.path.join(cfg["training"]["output_dir"], "checkpoint-best")
 
     def _generate_sample(self, model, tokenizer, problem, device, max_new_tokens=1024):
         from eval import format_prompt
         import torch as _torch
-        prompt = format_prompt(problem, tokenizer)
+        prompt = format_prompt(problem, tokenizer, self.verifier_tokenizer)
         enc = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=2048).to(device)
         with _torch.no_grad():
             out = model.generate(
@@ -103,7 +102,7 @@ class PeriodicEvalCallback(TrainerCallback):
             tokenizer.padding_side = "left"
             device = next(model.parameters()).device
             print(f"[step {state.global_step}] running benchmarks")
-            results = evaluate_all(model, tokenizer, self.cfg, device, max_samples=50)
+            results = evaluate_all(model, tokenizer, self.cfg, device, max_samples=50, verifier_tokenizer=self.verifier_tokenizer)
             if wandb.run is not None:
                 wandb.define_metric("eval/*", step_metric="train/global_step", step_sync=False)
                 wandb.log(
@@ -195,7 +194,7 @@ def main():
         answer_weight=answer_weight,
     )
 
-    train_ds = build_train_dataset(cfg, tokenizer)
+    train_ds = build_train_dataset(cfg, tokenizer, reward_model.tokenizer)
 
     # TRL requires generation_batch_size (per_device * world * grad_accum) to be
     # divisible by num_generations. Auto-bump grad_accum so this always holds.
@@ -257,7 +256,7 @@ def main():
         for ex in _ds:
             prob = ex[math500_bench["problem_key"]]
             gold = ex[math500_bench["answer_key"]]
-            prompt = format_prompt(prob, tokenizer)
+            prompt = format_prompt(prob, tokenizer, reward_model.tokenizer)
             enc = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=2048).to(_device)
             out = model.generate(
                 **enc, max_new_tokens=1024, do_sample=False,
@@ -276,7 +275,7 @@ def main():
         train_dataset=train_ds,
         callbacks=[
             GradientStepPrintCallback(),
-            PeriodicEvalCallback(cfg, cfg["training"]["eval_steps"], baseline_samples=baseline_samples),
+            PeriodicEvalCallback(cfg, cfg["training"]["eval_steps"], baseline_samples=baseline_samples, verifier_tokenizer=reward_model.tokenizer),
         ],
     )
 
@@ -286,7 +285,7 @@ def main():
         tokenizer.padding_side = "left"
         device = next(model.parameters()).device
         print("[step 0] baseline benchmarks")
-        baseline = evaluate_all(model, tokenizer, cfg, device, max_samples=50, debug=True)
+        baseline = evaluate_all(model, tokenizer, cfg, device, max_samples=50, debug=True, verifier_tokenizer=reward_model.tokenizer)
         if wandb.run is not None:
             wandb.log(
                 {f"eval/{name}_pass@1": r["pass@1"] for name, r in baseline.items()},
