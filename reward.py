@@ -153,7 +153,7 @@ class CMERewardModel:
         rewards: List = []
         for prompt, response in zip(prompts, responses):
             if not response or not response.strip():
-                rewards.append(-5.0 if not token_level else torch.tensor([-5.0]))
+                rewards.append(-50.0 if not token_level else torch.tensor([-50.0]))
                 continue
 
             # Need offsets whenever we have to restrict to the answer span.
@@ -175,7 +175,7 @@ class CMERewardModel:
             response_ids = response_enc.input_ids[0]
 
             if response_ids.numel() == 0:
-                rewards.append(-5.0 if not token_level else torch.tensor([-5.0]))
+                rewards.append(-50.0 if not token_level else torch.tensor([-50.0]))
                 continue
 
             full_ids = torch.cat([prompt_ids, response_ids], dim=0)
