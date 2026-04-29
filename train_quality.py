@@ -103,6 +103,7 @@ def build_quality_reward_fn(reward_model: CMERewardModel, reward_metric: str = "
         rewards = reward_model.score(
             prompt_texts, completion_texts,
             token_level=False, answer_only=False,
+            no_box_penalty=0.0,
             reward_metric=reward_metric,
         )
 
