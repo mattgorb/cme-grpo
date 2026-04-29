@@ -7,7 +7,7 @@
 
 model:
   generator: Qwen/Qwen2.5-0.5B
-  verifier: google/gemma-3n-E4B-it
+  verifier: google/gemma-4-E4B-it
   # For three-way LLM judge comparison
   base: Qwen/Qwen2.5-0.5B
   instruct: Qwen/Qwen2.5-0.5B-Instruct
@@ -43,7 +43,7 @@ training:
 
 reward:
   max_verifier_length: 2048
-  token_level: false
+  token_level: true
   answer_only_cme: false
   #no_box_penalty: 5
   reward_metric: entropy
