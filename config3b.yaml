@@ -1,7 +1,7 @@
 
 #
 model:
-  generator: microsoft/phi-1_5
+  generator: meta-llama/Llama-3.2-1B-Instruct
   #verifier: Qwen/Qwen2.5-Math-7B
   verifier: Qwen/Qwen2.5-Math-7B-Instruct
 
@@ -36,7 +36,7 @@ generation:
 training:
   learning_rate: 1.0e-7
   max_grad_norm: 1.0
-  kl_coef: 0.01
+  kl_coef: 0.02
   per_device_train_batch_size: 1
   gradient_accumulation_steps: 8
   num_train_epochs: 1
