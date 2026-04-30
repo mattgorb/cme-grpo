@@ -64,8 +64,7 @@ def format_prompt(instruction: str, tokenizer) -> str:
 def build_train_dataset(cfg: dict, tokenizer):
     ds = load_dataset(cfg["data"]["train_dataset"], split="train")
     max_samples = cfg["data"].get("max_train_samples", 5000)
-    if len(ds) > max_samples:
-        ds = ds.shuffle(seed=42).select(range(max_samples))
+    max_prompt_length = cfg["data"].get("max_prompt_length", 512)
 
     def _map(ex):
         instruction = ex.get("instruction", ex.get("prompt", ""))
@@ -75,7 +74,26 @@ def build_train_dataset(cfg: dict, tokenizer):
         }
 
     keep = {"instruction"}
-    return ds.map(_map, remove_columns=[c for c in ds.column_names if c not in keep])
+    ds = ds.map(_map, remove_columns=[c for c in ds.column_names if c not in keep])
+
+    # Filter prompts longer than max_prompt_length (after templating). Done
+    # BEFORE the random subsample so we deterministically end up with the
+    # requested number of short-enough prompts.
+    def _short_enough(ex):
+        n = len(tokenizer(ex["prompt"], add_special_tokens=False)["input_ids"])
+        return n <= max_prompt_length
+
+    before = len(ds)
+    ds = ds.filter(_short_enough)
+    print(
+        f"[build_train_dataset] kept {len(ds)}/{before} prompts "
+        f"(max_prompt_length={max_prompt_length})",
+        flush=True,
+    )
+
+    if len(ds) > max_samples:
+        ds = ds.shuffle(seed=42).select(range(max_samples))
+    return ds
 
 
 def _format_prompt_for_quality_verifier(instruction: str, verifier_tokenizer) -> str:
@@ -713,6 +731,25 @@ def main():
     else:
         print("\nLoading eval prompts from UltraFeedback...", flush=True)
         eval_ds = load_dataset(cfg["data"]["train_dataset"], split="train")
+
+        # Filter eval prompts by length BEFORE the deterministic select, using
+        # the same threshold as training so the eval distribution matches.
+        max_prompt_length = cfg["data"].get("max_prompt_length", 512)
+        before_filter = len(eval_ds)
+
+        def _short_enough(ex):
+            inst = ex.get("instruction", ex.get("prompt", ""))
+            templated = format_prompt(inst, tokenizer)
+            n = len(tokenizer(templated, add_special_tokens=False)["input_ids"])
+            return n <= max_prompt_length
+
+        eval_ds = eval_ds.filter(_short_enough)
+        print(
+            f"[eval] kept {len(eval_ds)}/{before_filter} prompts "
+            f"(max_prompt_length={max_prompt_length})",
+            flush=True,
+        )
+
         eval_ds = eval_ds.shuffle(seed=99).select(range(judge_num_samples))
         eval_instructions = [
             ex.get("instruction", ex.get("prompt", "")) for ex in eval_ds
