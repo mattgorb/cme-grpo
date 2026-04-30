@@ -24,7 +24,7 @@ generation:
   top_p: 1.0
 
 training:
-  learning_rate: 3.0e-6
+  learning_rate: 1.0e-7
   max_grad_norm: 1.0
   kl_coef: 0.01
   per_device_train_batch_size: 1
@@ -37,7 +37,7 @@ training:
   save_total_limit: 3
   eval_steps: 200
   skip_baseline_eval: false
-  output_dir: ./outputs/cme-grpo-quality-qwen0.5b
+  output_dir: ./outputs/cme-grpo-quality-qwen0.5b-2
   bf16: true
   seed: 42
 
@@ -56,4 +56,4 @@ eval:
 
 wandb:
   project: cme-grpo
-  run_name: quality-qwen0.5b
+  run_name: quality-qwen0.5b-2

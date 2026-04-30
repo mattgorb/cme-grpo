@@ -69,9 +69,28 @@ def build_train_dataset(cfg: dict, tokenizer):
 
     def _map(ex):
         instruction = ex.get("instruction", ex.get("prompt", ""))
-        return {"prompt": format_prompt(instruction, tokenizer)}
+        return {
+            "prompt": format_prompt(instruction, tokenizer),
+            "instruction": instruction,  # raw, for verifier-side reformatting
+        }
 
-    return ds.map(_map, remove_columns=[c for c in ds.column_names])
+    keep = {"instruction"}
+    return ds.map(_map, remove_columns=[c for c in ds.column_names if c not in keep])
+
+
+def _format_prompt_for_quality_verifier(instruction: str, verifier_tokenizer) -> str:
+    """Rebuild the prompt under the verifier's expected distribution.
+
+    For instruct verifiers (Gemma, Qwen, Mistral chat models), use their chat
+    template so the verifier scores responses in the format it was trained on.
+    Falls back to the plain Alpaca template when the verifier has no chat template.
+    """
+    if verifier_tokenizer is not None and verifier_tokenizer.chat_template is not None:
+        msgs = [{"role": "user", "content": instruction}]
+        return verifier_tokenizer.apply_chat_template(
+            msgs, tokenize=False, add_generation_prompt=True,
+        )
+    return PROMPT_TEMPLATE.format(instruction=instruction)
 
 
 def build_quality_reward_fn(reward_model: CMERewardModel, reward_metric: str = "entropy"):
@@ -92,6 +111,16 @@ def build_quality_reward_fn(reward_model: CMERewardModel, reward_metric: str = "
                 c = "\n".join(m.get("content", "") for m in c)
             prompt_texts.append(p)
             completion_texts.append(c)
+
+        # Rebuild prompts under the verifier's chat template when raw instruction
+        # is available, so the verifier scores responses in its native format
+        # rather than the generator-facing Alpaca prompt.
+        instructions = kwargs.get("instruction")
+        if instructions is not None:
+            prompt_texts = [
+                _format_prompt_for_quality_verifier(inst, reward_model.tokenizer)
+                for inst in instructions
+            ]
 
         debug_this = _call_count[0] < 3
         if debug_this:
