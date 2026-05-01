@@ -57,8 +57,22 @@ rm -rf /tmp/huggingface_* || true
 echo "[install] removing torchvision (incompatible with bundled torch)"
 pip uninstall -y torchvision torchaudio || true
 
-echo "[install] installing requirements"
-pip install -r "$(dirname "$0")/requirements.txt"
+# Preserve the existing CUDA-enabled torch from the RunPod base image. If we
+# pip install -r requirements.txt blindly, it can replace torch with a
+# CPU-only PyPI wheel and break GPU training.
+echo "[install] checking torch CUDA support"
+HAS_CUDA="$(python -c 'import torch; print(int(torch.cuda.is_available()))' 2>/dev/null || echo 0)"
+if [ "$HAS_CUDA" = "1" ]; then
+    echo "[install] CUDA torch detected — installing requirements WITHOUT touching torch"
+    # Strip torch line(s) from requirements before installing.
+    grep -viE '^[[:space:]]*torch([[:space:]<>=!]|$)' "$(dirname "$0")/requirements.txt" > /tmp/requirements_no_torch.txt
+    pip install -r /tmp/requirements_no_torch.txt
+else
+    echo "[install] no CUDA torch — installing torch with CUDA 12.1 wheels"
+    pip install --upgrade --force-reinstall torch --index-url https://download.pytorch.org/whl/cu121
+    grep -viE '^[[:space:]]*torch([[:space:]<>=!]|$)' "$(dirname "$0")/requirements.txt" > /tmp/requirements_no_torch.txt
+    pip install -r /tmp/requirements_no_torch.txt
+fi
 
 echo "[install] sanity-checking imports"
 python -c "from transformers import PreTrainedModel, TrainerCallback; from peft import PeftModel; from trl import GRPOTrainer; print('[install] ok')"
