@@ -679,6 +679,8 @@ def main():
         seed=cfg["training"]["seed"],
         num_generations=cfg["generation"]["num_generations"],
         temperature=cfg["generation"]["temperature"],
+        top_p=cfg["generation"].get("top_p", 1.0),
+        repetition_penalty=cfg["generation"].get("repetition_penalty", 1.0),
         max_completion_length=cfg["generation"]["max_new_tokens"],
         beta=cfg["training"]["kl_coef"],
         max_grad_norm=cfg["training"].get("max_grad_norm", 1.0),
