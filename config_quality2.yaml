@@ -6,11 +6,11 @@
 # Eval: LLM judge win rate (finetuned vs base vs instruct)
 
 model:
-  generator: meta-llama/Llama-3.2-1B
-  verifier: Qwen/Qwen2.5-7B-Instruct
+  generator: Qwen/Qwen2.5-1.5B
+  verifier: google/gemma-4-E4B-it
   # For three-way LLM judge comparison
-  base: meta-llama/Llama-3.2-1B
-  instruct: meta-llama/Llama-3.2-1B-Instruct
+  base: Qwen/Qwen2.5-1.5B
+  instruct: Qwen/Qwen2.5-1.5B-Instruct
 
 data:
   train_dataset: openbmb/UltraFeedback
