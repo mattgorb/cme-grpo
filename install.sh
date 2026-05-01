@@ -57,22 +57,30 @@ rm -rf /tmp/huggingface_* || true
 echo "[install] removing torchvision (incompatible with bundled torch)"
 pip uninstall -y torchvision torchaudio || true
 
-# Preserve the existing CUDA-enabled torch from the RunPod base image. If we
-# pip install -r requirements.txt blindly, it can replace torch with a
-# CPU-only PyPI wheel and break GPU training.
-echo "[install] checking torch CUDA support"
-HAS_CUDA="$(python -c 'import torch; print(int(torch.cuda.is_available()))' 2>/dev/null || echo 0)"
-if [ "$HAS_CUDA" = "1" ]; then
-    echo "[install] CUDA torch detected — installing requirements WITHOUT touching torch"
-    # Strip torch line(s) from requirements before installing.
-    grep -viE '^[[:space:]]*torch([[:space:]<>=!]|$)' "$(dirname "$0")/requirements.txt" > /tmp/requirements_no_torch.txt
-    pip install -r /tmp/requirements_no_torch.txt
+# torch must be both CUDA-enabled AND >= 2.6 (TRL imports FSDPModule, which
+# only exists in torch 2.6+). If either condition fails, install cu124 wheels.
+echo "[install] checking torch (CUDA + version >= 2.6)"
+TORCH_OK="$(python <<'PY' 2>/dev/null || echo 0
+try:
+    import torch
+    from packaging.version import parse as v
+    print(int(torch.cuda.is_available() and v(torch.__version__) >= v("2.6.0")))
+except Exception:
+    print(0)
+PY
+)"
+
+if [ "$TORCH_OK" = "1" ]; then
+    echo "[install] torch is OK — installing requirements WITHOUT touching torch"
 else
-    echo "[install] no CUDA torch — installing torch with CUDA 12.1 wheels"
+    echo "[install] torch missing CUDA or < 2.6 — installing cu124 wheels"
     pip install --upgrade --force-reinstall torch --index-url https://download.pytorch.org/whl/cu124
-    grep -viE '^[[:space:]]*torch([[:space:]<>=!]|$)' "$(dirname "$0")/requirements.txt" > /tmp/requirements_no_torch.txt
-    pip install -r /tmp/requirements_no_torch.txt
 fi
+
+# Strip torch line(s) from requirements so the rest of the install never
+# overrides whatever torch we just confirmed/installed.
+grep -viE '^[[:space:]]*torch([[:space:]<>=!]|$)' "$(dirname "$0")/requirements.txt" > /tmp/requirements_no_torch.txt
+pip install -r /tmp/requirements_no_torch.txt
 
 echo "[install] sanity-checking imports"
 python -c "from transformers import PreTrainedModel, TrainerCallback; from peft import PeftModel; from trl import GRPOTrainer; print('[install] ok')"
