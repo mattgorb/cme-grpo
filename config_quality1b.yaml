@@ -6,7 +6,7 @@
 # Eval: LLM judge win rate (finetuned vs base vs instruct)
 
 model:
-  generator: Qwen/Qwen2.5-0.5B
+  generator: Qwen/Qwen2.5-0.5B-Instruct
   verifier: google/gemma-4-E4B-it
   # For three-way LLM judge comparison
   base: Qwen/Qwen2.5-0.5B
@@ -24,9 +24,9 @@ generation:
   top_p: 1.0
 
 training:
-  learning_rate: 1.0e-6
-  max_grad_norm: 5.0
-  kl_coef: 0.01
+  learning_rate: 3.0e-6
+  max_grad_norm: 1.0
+  kl_coef: 0 #0.01
   per_device_train_batch_size: 1
   gradient_accumulation_steps: 8
   num_train_epochs: 1
