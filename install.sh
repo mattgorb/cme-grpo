@@ -69,7 +69,7 @@ if [ "$HAS_CUDA" = "1" ]; then
     pip install -r /tmp/requirements_no_torch.txt
 else
     echo "[install] no CUDA torch — installing torch with CUDA 12.1 wheels"
-    pip install --upgrade --force-reinstall torch --index-url https://download.pytorch.org/whl/cu121
+    pip install --upgrade --force-reinstall torch --index-url https://download.pytorch.org/whl/cu124
     grep -viE '^[[:space:]]*torch([[:space:]<>=!]|$)' "$(dirname "$0")/requirements.txt" > /tmp/requirements_no_torch.txt
     pip install -r /tmp/requirements_no_torch.txt
 fi
