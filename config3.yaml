@@ -54,8 +54,8 @@ training:
 reward:
   max_verifier_length: 3072
   token_level: false
-  answer_only_cme: true
-  no_box_penalty: 15
+  answer_only_cme: false
+  no_box_penalty: 5
 
 eval:
   max_new_tokens: 3072
