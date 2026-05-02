@@ -38,14 +38,14 @@ training:
   max_grad_norm: 1.0
   kl_coef: 0.01
   per_device_train_batch_size: 1
-  gradient_accumulation_steps: 32
+  gradient_accumulation_steps: 8
   num_train_epochs: 1
   max_steps: 5000
   warmup_steps: 20
   logging_steps: 1
-  save_steps: 50
+  save_steps: 200
   save_total_limit: 3
-  eval_steps: 50
+  eval_steps: 200
   skip_baseline_eval: true
   output_dir: ./outputs/cme-grpo-config3
   bf16: true
@@ -53,7 +53,7 @@ training:
 
 reward:
   max_verifier_length: 3072
-  token_level: true
+  token_level: false
   answer_only_cme: false
   no_box_penalty: 5
 
