@@ -34,9 +34,9 @@ generation:
   top_p: 1.0
 
 training:
-  learning_rate: 1.0e-6
+  learning_rate: 3.0e-6
   max_grad_norm: 1.0
-  kl_coef: 0.01
+  kl_coef: 0 #0.01
   per_device_train_batch_size: 1
   gradient_accumulation_steps: 8
   num_train_epochs: 1
@@ -54,7 +54,7 @@ training:
 reward:
   max_verifier_length: 3072
   token_level: false
-  answer_only_cme: false
+  answer_only_cme: true
   no_box_penalty: 5
 
 eval:
