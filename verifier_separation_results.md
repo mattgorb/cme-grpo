@@ -199,3 +199,37 @@ meta-llama/Llama-3.2-1B-Instruct      1.2B   24.0%   24.0%
     [88/100] running acc: 0.068
     [96/100] running acc: 0.062
   math500: pass@1 = 0.0700 (7/100)
+
+
+
+
+
+
+  gemma-3-1b-it: 
+      [50/100] running acc: 0.440
+    [52/100] running acc: 0.423
+    [54/100] running acc: 0.407
+    [56/100] running acc: 0.411
+    [58/100] running acc: 0.414
+    [60/100] running acc: 0.400
+    [62/100] running acc: 0.387
+    [64/100] running acc: 0.391
+    [66/100] running acc: 0.379
+    [68/100] running acc: 0.382
+    [70/100] running acc: 0.400
+    [72/100] running acc: 0.403
+    [74/100] running acc: 0.405
+    [76/100] running acc: 0.408
+    [78/100] running acc: 0.410
+    [80/100] running acc: 0.400
+    [82/100] running acc: 0.402
+    [84/100] running acc: 0.417
+    [86/100] running acc: 0.407
+    [88/100] running acc: 0.398
+    [90/100] running acc: 0.400
+    [92/100] running acc: 0.391
+    [94/100] running acc: 0.394
+    [96/100] running acc: 0.385
+    [98/100] running acc: 0.398
+  math500: pass@1 = 0.3900 (39/100)
+root@0e211392cf67:/workspace/cme-grpo# python eval.py --model google/gemma-3-1b-it --config config3.yaml

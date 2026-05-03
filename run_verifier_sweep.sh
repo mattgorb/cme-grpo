@@ -9,12 +9,18 @@ set -euo pipefail
 mkdir -p logs configs/sweep
 
 # label : MATH-500 pass@1 : verifier model
+# V1-V5 are same-family (Qwen) verifiers across capability range.
+# V6-V7 are cross-family verifiers to test the style-alignment hypothesis:
+# does a non-Qwen verifier of comparable capability degrade outcomes?
 VERIFIERS=(
     #"v1:83:Qwen/Qwen2.5-Math-7B-Instruct"
     #"v2:75:Qwen/Qwen2.5-Math-1.5B-Instruct"
     #"v3:65:Qwen/Qwen2.5-Math-1.5B"
     "v4:35:Qwen/Qwen2.5-0.5B-Instruct"
     "v5:20:Qwen/Qwen2.5-0.5B"
+    "v6:30:meta-llama/Llama-3.1-8B-Instruct"   # cross-family (Llama)
+    "v7:25:google/gemma-2-2b-it"               # cross-family (Gemma)
+    "v8:30:allenai/OLMo-2-1124-7B-Instruct"    # cross-family (OLMo, fully open)
 )
 
 for entry in "${VERIFIERS[@]}"; do
