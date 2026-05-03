@@ -6,11 +6,11 @@
 # Eval: LLM judge win rate (finetuned vs base vs instruct)
 
 model:
-  generator: google/gemma-3-270m
+  generator: allenai/OLMo-2-0425-1B-SFT
   verifier: google/gemma-4-E4B-it
   # For three-way LLM judge comparison
-  base: google/gemma-3-270m
-  instruct: google/gemma-3-270m-it
+  base: allenai/OLMo-2-0425-1B-SFT 
+  instruct: allenai/OLMo-2-0425-1B-DPO
 
 data:
   train_dataset: openbmb/UltraFeedback
