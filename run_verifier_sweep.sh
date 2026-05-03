@@ -10,9 +10,9 @@ mkdir -p logs configs/sweep
 
 # label : MATH-500 pass@1 : verifier model
 VERIFIERS=(
-    "v1:83:Qwen/Qwen2.5-Math-7B-Instruct"
-    "v2:75:Qwen/Qwen2.5-Math-1.5B-Instruct"
-    "v3:65:Qwen/Qwen2.5-Math-1.5B"
+    #"v1:83:Qwen/Qwen2.5-Math-7B-Instruct"
+    #"v2:75:Qwen/Qwen2.5-Math-1.5B-Instruct"
+    #"v3:65:Qwen/Qwen2.5-Math-1.5B"
     "v4:35:Qwen/Qwen2.5-0.5B-Instruct"
     "v5:20:Qwen/Qwen2.5-0.5B"
 )
