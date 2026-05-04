@@ -54,6 +54,15 @@ rm -rf /root/.cache/pip || true
 rm -rf /root/.cache/torch || true
 rm -rf /tmp/huggingface_* || true
 
+# Symlink /root/.cache -> /workspace/.cache so any tool that defaults to
+# ~/.cache (regardless of env vars) writes to the persistent volume disk.
+echo "[install] symlinking /root/.cache -> /workspace/.cache"
+mkdir -p "$CACHE_ROOT"
+if [ ! -L /root/.cache ]; then
+    rm -rf /root/.cache
+    ln -s "$CACHE_ROOT" /root/.cache
+fi
+
 echo "[install] removing torchvision (incompatible with bundled torch)"
 pip uninstall -y torchvision torchaudio || true
 

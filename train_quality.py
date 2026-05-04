@@ -198,6 +198,31 @@ def _generate_responses(model, tokenizer, prompts: list[str], device: str, max_n
     return responses
 
 
+def _get_openai_embeddings(
+    texts: list[str], model: str = "text-embedding-3-small", batch_size: int = 50,
+) -> list[list[float]]:
+    """Get OpenAI embeddings for a batch of texts. Truncates very long texts to
+    stay under the 8191-token API limit (~32k chars worst case)."""
+    from openai import OpenAI
+    client = OpenAI()
+    embeddings: list[list[float]] = []
+    for i in range(0, len(texts), batch_size):
+        batch = texts[i : i + batch_size]
+        # Replace empty strings with a single space — API rejects empty input.
+        cleaned = [(t[:30000] if t and t.strip() else " ") for t in batch]
+        resp = client.embeddings.create(model=model, input=cleaned)
+        embeddings.extend([d.embedding for d in resp.data])
+    return embeddings
+
+
+def _cosine_similarity(a: list[float], b: list[float]) -> float:
+    import math
+    dot = sum(x * y for x, y in zip(a, b))
+    na = math.sqrt(sum(x * x for x in a))
+    nb = math.sqrt(sum(x * x for x in b))
+    return dot / (na * nb) if na > 0 and nb > 0 else 0.0
+
+
 def _judge_pairwise(
     instructions: list[str],
     responses_a: list[str],
@@ -416,29 +441,109 @@ class LLMJudgeEvalCallback(TrainerCallback):
                 print(f"  [WARN] judge vs base failed ({type(e).__name__}: {e})", flush=True)
                 vs_base = {"wins_a": 0, "wins_b": 0, "ties": 0, "total": 0, "winrate_a": 0.5, "winrate_b": 0.5}
 
-            print(f"[step {state.global_step}] running LLM judge (finetuned vs instruct)...", flush=True)
+            # Skip vs-instruct judge for samples where finetuned == base (training
+            # didn't change the greedy output, so vs-instruct degenerates to base
+            # vs instruct, which is a fixed property of the dataset, not the run).
+            identical_to_base = [
+                ft == base for ft, base in zip(ft_responses, self.base_responses)
+            ]
+            changed_idx = [i for i, same in enumerate(identical_to_base) if not same]
+            n_skipped = sum(identical_to_base)
+            print(
+                f"[step {state.global_step}] running LLM judge (finetuned vs instruct) "
+                f"on {len(changed_idx)}/{len(ft_responses)} samples "
+                f"(skipped {n_skipped} where finetuned == base)...",
+                flush=True,
+            )
             try:
-                vs_instruct = _judge_pairwise(
-                    self.eval_instructions, ft_responses, self.instruct_responses,
-                    judge_model=self.judge_model, label_a="finetuned", label_b="instruct",
-                )
+                if changed_idx:
+                    sub_instructions = [self.eval_instructions[i] for i in changed_idx]
+                    sub_ft = [ft_responses[i] for i in changed_idx]
+                    sub_in = [self.instruct_responses[i] for i in changed_idx]
+                    vs_instruct_sub = _judge_pairwise(
+                        sub_instructions, sub_ft, sub_in,
+                        judge_model=self.judge_model, label_a="finetuned", label_b="instruct",
+                    )
+                    # Re-key per_sample records to original (full-set) indices so
+                    # downstream code can look them up by sample index.
+                    for sub_pos, original_idx in enumerate(changed_idx):
+                        for r in vs_instruct_sub.get("per_sample", []):
+                            if r.get("index") == sub_pos:
+                                r["index"] = original_idx
+                                break
+                    vs_instruct = vs_instruct_sub
+                    vs_instruct["skipped_identical"] = n_skipped
+                else:
+                    print("  [info] all finetuned responses identical to base — skipping vs-instruct judge entirely", flush=True)
+                    vs_instruct = {
+                        "wins_a": 0, "wins_b": 0, "ties": 0, "total": 0,
+                        "winrate_a": 0.5, "winrate_b": 0.5,
+                        "skipped_identical": n_skipped, "per_sample": [],
+                    }
             except Exception as e:
                 print(f"  [WARN] judge vs instruct failed ({type(e).__name__}: {e})", flush=True)
-                vs_instruct = {"wins_a": 0, "wins_b": 0, "ties": 0, "total": 0, "winrate_a": 0.5, "winrate_b": 0.5}
+                vs_instruct = {
+                    "wins_a": 0, "wins_b": 0, "ties": 0, "total": 0,
+                    "winrate_a": 0.5, "winrate_b": 0.5,
+                    "skipped_identical": n_skipped, "per_sample": [],
+                }
 
             print(f"[step {state.global_step}] JUDGE RESULTS:")
             print(f"  vs base:    finetuned wins {vs_base['wins_a']}, base wins {vs_base['wins_b']}, ties {vs_base['ties']} → winrate {vs_base['winrate_a']:.1%}")
             print(f"  vs instruct: finetuned wins {vs_instruct['wins_a']}, instruct wins {vs_instruct['wins_b']}, ties {vs_instruct['ties']} → winrate {vs_instruct['winrate_a']:.1%}")
 
+            # Pairwise embedding similarity (computed here so we can log mean
+            # values to wandb alongside the judge metrics).
+            similarities: list[dict] = []
+            sim_means = {"base_vs_finetuned": None, "base_vs_instruct": None, "finetuned_vs_instruct": None}
+            try:
+                print(f"[step {state.global_step}] computing embedding similarities...", flush=True)
+                emb_base = _get_openai_embeddings(self.base_responses)
+                emb_ft   = _get_openai_embeddings(ft_responses)
+                emb_inst = _get_openai_embeddings(self.instruct_responses)
+                for i in range(len(ft_responses)):
+                    similarities.append({
+                        "base_vs_finetuned":     _cosine_similarity(emb_base[i], emb_ft[i]),
+                        "base_vs_instruct":      _cosine_similarity(emb_base[i], emb_inst[i]),
+                        "finetuned_vs_instruct": _cosine_similarity(emb_ft[i],   emb_inst[i]),
+                    })
+                for k in sim_means:
+                    vals = [s[k] for s in similarities if s[k] is not None]
+                    sim_means[k] = sum(vals) / len(vals) if vals else None
+                print(
+                    f"  embedding sim — base↔ft: {sim_means['base_vs_finetuned']:.4f} "
+                    f"| base↔instruct: {sim_means['base_vs_instruct']:.4f} "
+                    f"| ft↔instruct: {sim_means['finetuned_vs_instruct']:.4f}",
+                    flush=True,
+                )
+            except Exception as e:
+                print(f"  [WARN] embedding sim failed ({type(e).__name__}: {e}); skipping", flush=True)
+                similarities = [
+                    {"base_vs_finetuned": None, "base_vs_instruct": None, "finetuned_vs_instruct": None}
+                    for _ in ft_responses
+                ]
+
             if wandb.run is not None:
                 wandb.define_metric("eval/*", step_metric="train/global_step", step_sync=False)
-                wandb.log({
+                log_payload = {
                     "train/global_step": state.global_step,
                     "eval/winrate_vs_base": vs_base["winrate_a"],
                     "eval/winrate_vs_instruct": vs_instruct["winrate_a"],
                     "eval/wins_vs_base": vs_base["wins_a"],
                     "eval/wins_vs_instruct": vs_instruct["wins_a"],
-                })
+                    "eval/n_finetuned_equals_base": int(sum(identical_to_base)),
+                    "eval/judged_vs_instruct_count": vs_instruct.get("total", 0),
+                }
+                if sim_means["base_vs_finetuned"] is not None:
+                    log_payload["eval/embsim_base_vs_finetuned"] = sim_means["base_vs_finetuned"]
+                    log_payload["eval/embsim_base_vs_instruct"] = sim_means["base_vs_instruct"]
+                    log_payload["eval/embsim_finetuned_vs_instruct"] = sim_means["finetuned_vs_instruct"]
+                    # Net drift toward instruct: positive = finetuned moved closer
+                    # to instruct's style than base was; negative = moved away.
+                    log_payload["eval/embsim_drift_toward_instruct"] = (
+                        sim_means["finetuned_vs_instruct"] - sim_means["base_vs_instruct"]
+                    )
+                wandb.log(log_payload)
 
             # Save best checkpoints for both metrics. Each is independently tracked
             # and saved to its own directory, so both "best vs base" and
@@ -528,21 +633,70 @@ class LLMJudgeEvalCallback(TrainerCallback):
             for idx in self.sample_indices:
                 judge_vs_base = vs_base_per.get(idx, {})
                 judge_vs_ins  = vs_ins_per.get(idx, {})
+                ft_eq_base = identical_to_base[idx]
                 samples.append({
                     "index": idx,
                     "instruction": self.eval_instructions[idx],
                     "base_response": self.base_responses[idx],
                     "finetuned_response": ft_responses[idx],
                     "instruct_response": self.instruct_responses[idx],
+                    "finetuned_equals_base": ft_eq_base,
+                    "embedding_similarity": similarities[idx],
                     "judge_finetuned_vs_base": {
                         "winner": judge_vs_base.get("winner_label", ""),
                         "reason": judge_vs_base.get("reason", ""),
                     },
-                    "judge_finetuned_vs_instruct": {
-                        "winner": judge_vs_ins.get("winner_label", ""),
-                        "reason": judge_vs_ins.get("reason", ""),
-                    },
+                    "judge_finetuned_vs_instruct": (
+                        {"winner": "SKIPPED_IDENTICAL_TO_BASE", "reason": ""}
+                        if ft_eq_base
+                        else {
+                            "winner": judge_vs_ins.get("winner_label", ""),
+                            "reason": judge_vs_ins.get("reason", ""),
+                        }
+                    ),
                 })
+
+            # Aggregate-similarity summary file (separate from per-sample dump).
+            def _stats(vals):
+                vals = [v for v in vals if v is not None]
+                if not vals:
+                    return {"count": 0, "mean": None, "min": None, "max": None}
+                return {
+                    "count": len(vals),
+                    "mean": sum(vals) / len(vals),
+                    "min": min(vals),
+                    "max": max(vals),
+                }
+            sim_summary = {
+                "step": state.global_step,
+                "n_samples": len(samples),
+                "n_finetuned_equals_base": int(sum(identical_to_base)),
+                "judge_vs_base": {
+                    "wins_finetuned": vs_base.get("wins_a", 0),
+                    "wins_base": vs_base.get("wins_b", 0),
+                    "ties": vs_base.get("ties", 0),
+                    "winrate_finetuned": vs_base.get("winrate_a", 0.0),
+                },
+                "judge_vs_instruct_changed_only": {
+                    "n_judged": vs_instruct.get("total", 0),
+                    "wins_finetuned": vs_instruct.get("wins_a", 0),
+                    "wins_instruct": vs_instruct.get("wins_b", 0),
+                    "ties": vs_instruct.get("ties", 0),
+                    "winrate_finetuned": vs_instruct.get("winrate_a", 0.0),
+                    "skipped_identical_to_base": vs_instruct.get("skipped_identical", 0),
+                },
+                "embedding_similarity_stats": {
+                    "base_vs_finetuned":     _stats([s["embedding_similarity"]["base_vs_finetuned"] for s in samples]),
+                    "base_vs_instruct":      _stats([s["embedding_similarity"]["base_vs_instruct"] for s in samples]),
+                    "finetuned_vs_instruct": _stats([s["embedding_similarity"]["finetuned_vs_instruct"] for s in samples]),
+                },
+            }
+            summary_file = os.path.join(
+                self.samples_dir, f"step_{state.global_step:05d}_summary.json"
+            )
+            import json as _json
+            with open(summary_file, "w", encoding="utf-8") as f:
+                _json.dump(sim_summary, f, indent=2, ensure_ascii=False)
 
             # JSON (machine-readable).
             sample_file = os.path.join(
