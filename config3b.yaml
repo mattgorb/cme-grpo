@@ -45,7 +45,7 @@ training:
   logging_steps: 1
   save_steps: 20
   save_total_limit: 3
-  eval_steps: 200
+  eval_steps: 20
   skip_baseline_eval: true
   output_dir: ./outputs/cme-grpo-config3b
   bf16: true
