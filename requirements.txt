@@ -14,3 +14,4 @@ numpy>=1.26.0
 sentencepiece
 protobuf
 math-verify
+openai
