@@ -16,9 +16,9 @@ VERIFIERS=(
     #"v1:83:Qwen/Qwen2.5-Math-7B-Instruct"
     #"v2:75:Qwen/Qwen2.5-Math-1.5B-Instruct"
     #"v3:65:Qwen/Qwen2.5-Math-1.5B"
-    "v4:35:Qwen/Qwen2.5-0.5B-Instruct"
-    "v5:20:Qwen/Qwen2.5-0.5B"
-    "v6:24:meta-llama/Llama-3.2-1B-Instruct"   # cross-family (Llama)
+    #"v4:35:Qwen/Qwen2.5-0.5B-Instruct"
+    #"v5:20:Qwen/Qwen2.5-0.5B"
+    #"v6:24:meta-llama/Llama-3.2-1B-Instruct"   # cross-family (Llama)
     "v7:25:google/gemma-2-2b-it"               # cross-family (Gemma)
     "v8:15:allenai/OLMo-2-0425-1B-Instruct"    # cross-family (OLMo, fully open)
 )
