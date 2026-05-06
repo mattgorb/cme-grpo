@@ -464,13 +464,16 @@ class LLMJudgeEvalCallback(TrainerCallback):
                         sub_instructions, sub_ft, sub_in,
                         judge_model=self.judge_model, label_a="finetuned", label_b="instruct",
                     )
-                    # Re-key per_sample records to original (full-set) indices so
-                    # downstream code can look them up by sample index.
-                    for sub_pos, original_idx in enumerate(changed_idx):
-                        for r in vs_instruct_sub.get("per_sample", []):
-                            if r.get("index") == sub_pos:
-                                r["index"] = original_idx
-                                break
+                    # Re-key per_sample records to original (full-set) indices.
+                    # _judge_pairwise appends in input order, so position N in
+                    # per_sample corresponds to changed_idx[N]. Just zip-assign;
+                    # don't search by old index (search-and-modify-in-place
+                    # corrupts records when original_idx values collide with
+                    # sub_pos values).
+                    for r, original_idx in zip(
+                        vs_instruct_sub.get("per_sample", []), changed_idx
+                    ):
+                        r["index"] = original_idx
                     vs_instruct = vs_instruct_sub
                     vs_instruct["skipped_identical"] = n_skipped
                 else:
