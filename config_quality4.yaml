@@ -52,7 +52,7 @@ eval:
   max_new_tokens: 1536
   batch_size: 4
   judge_model: gpt-5.2
-  judge_num_samples: 50
+  judge_num_samples: 100
 
 wandb:
   project: cme-grpo
