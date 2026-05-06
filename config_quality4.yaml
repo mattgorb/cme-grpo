@@ -21,7 +21,7 @@ generation:
   temperature: 1.0
   max_new_tokens: 1536
   top_p: 1.0
-  #repetition_penalty: 1.2
+  repetition_penalty: 1.25
 
 training:
   learning_rate: 3.0e-6
