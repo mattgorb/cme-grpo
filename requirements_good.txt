@@ -217,7 +217,6 @@ jaraco.functools==4.0.1
 jaraco.text==3.12.1
 more-itertools==10.3.0
 packaging==24.1
-platformdirs==4.2.2
 tomli==2.0.1
 typeguard==4.3.0
 typing_extensions==4.12.2
