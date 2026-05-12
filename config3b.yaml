@@ -1,7 +1,7 @@
 
 #
 model:
-  generator: google/gemma-3-1b-pt
+  generator: google/gemma-3-1b-it
   #verifier: Qwen/Qwen2.5-Math-7B
   verifier: Qwen/Qwen2.5-Math-7B-Instruct
 
@@ -43,9 +43,9 @@ training:
   max_steps: 5000
   warmup_steps: 20
   logging_steps: 1
-  save_steps: 100
+  save_steps: 200
   save_total_limit: 3
-  eval_steps: 100
+  eval_steps: 200
   skip_baseline_eval: true
   output_dir: ./outputs/cme-grpo-config3b
   bf16: true
@@ -56,6 +56,7 @@ reward:
   token_level: false
   answer_only_cme: false
   no_box_penalty: 5
+  reward_metric: 'predictive_entropy'
 
 eval:
   max_new_tokens: 3072
