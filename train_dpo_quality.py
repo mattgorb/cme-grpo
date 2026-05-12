@@ -246,6 +246,9 @@ def main():
         print(f"[eval cache] saved to {cache_path}\n", flush=True)
 
     # ── DPO config ───────────────────────────────────────────────────────────
+    # NOTE: TRL 1.2.0 removed max_length/max_prompt_length from DPOConfig.
+    # build_dpo_dataset already filters by max_prompt_length, and DPOTrainer
+    # falls back to tokenizer.model_max_length for total seq length.
     dpo_cfg = DPOConfig(
         output_dir=cfg["training"]["output_dir"],
         learning_rate=cfg["training"]["learning_rate"],
@@ -260,8 +263,6 @@ def main():
         bf16=cfg["training"]["bf16"],
         seed=cfg["training"]["seed"],
         beta=cfg["training"].get("dpo_beta", 0.1),
-        max_length=cfg["data"].get("max_total_length", 2048),
-        max_prompt_length=cfg["data"]["max_prompt_length"],
         max_grad_norm=cfg["training"].get("max_grad_norm", 1.0),
         gradient_checkpointing=True,
         report_to=["wandb"],
