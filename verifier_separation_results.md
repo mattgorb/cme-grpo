@@ -233,3 +233,60 @@ meta-llama/Llama-3.2-1B-Instruct      1.2B   24.0%   24.0%
     [98/100] running acc: 0.398
   math500: pass@1 = 0.3900 (39/100)
 root@0e211392cf67:/workspace/cme-grpo# python eval.py --model google/gemma-3-1b-it --config config3.yaml
+
+
+
+
+============================================================
+Loading Qwen/Qwen2.5-Math-1.5B-Instruct
+============================================================
+Loading weights: 100%|██████████| 338/338 [00:00<00:00, 429.90it/s]
+    [2/100] running acc: 1.000
+    [4/100] running acc: 1.000
+    [6/100] running acc: 1.000
+    [8/100] running acc: 1.000
+    [10/100] running acc: 1.000
+    [12/100] running acc: 0.833
+    [14/100] running acc: 0.857
+    [16/100] running acc: 0.812
+    [18/100] running acc: 0.778
+    [20/100] running acc: 0.750
+    [22/100] running acc: 0.727
+    [24/100] running acc: 0.750
+    [26/100] running acc: 0.692
+    [28/100] running acc: 0.714
+    [30/100] running acc: 0.700
+    [32/100] running acc: 0.719
+    [34/100] running acc: 0.706
+    [36/100] running acc: 0.722
+    [38/100] running acc: 0.684
+    [40/100] running acc: 0.700
+    [42/100] running acc: 0.714
+    [44/100] running acc: 0.705
+    [46/100] running acc: 0.717
+    [48/100] running acc: 0.729
+    [50/100] running acc: 0.720
+    [52/100] running acc: 0.712
+    [54/100] running acc: 0.722
+    [56/100] running acc: 0.714
+    [58/100] running acc: 0.707
+    [60/100] running acc: 0.700
+    [62/100] running acc: 0.677
+    [64/100] running acc: 0.688
+    [66/100] running acc: 0.667
+    [68/100] running acc: 0.676
+    [70/100] running acc: 0.686
+    [72/100] running acc: 0.681
+    [74/100] running acc: 0.676
+    [76/100] running acc: 0.684
+    [78/100] running acc: 0.679
+    [80/100] running acc: 0.675
+    [82/100] running acc: 0.671
+    [84/100] running acc: 0.679
+    [86/100] running acc: 0.686
+    [88/100] running acc: 0.682
+    [90/100] running acc: 0.689
+    [92/100] running acc: 0.685
+    [94/100] running acc: 0.691
+    [96/100] running acc: 0.688
+    [98/100] running acc: 0.694

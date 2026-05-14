@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
-# Evaluate the 8 verifiers from the sweep on MATH-500/AMC-23/AIME-24 pass@1.
+# Evaluate the sweep verifiers on MATH-500 pass@1.
 # Settings match the in-training PeriodicEvalCallback:
-#   max_new_tokens=3072, batch_size=2, greedy (temperature=0), max_samples=100 for math500.
-# AMC-23 and AIME-24 use their full splits (40 / 30 problems) inside the eval script.
+#   max_new_tokens=3072, batch_size=2, greedy (temperature=0), max_samples=100.
 #
 # Output: verifier_capability.csv (one row per verifier with pass@1 per benchmark).
 
@@ -12,7 +11,7 @@ mkdir -p logs
 
 VERIFIERS=(
     #"Qwen/Qwen2.5-Math-7B-Instruct"      # v1
-    "Qwen/Qwen2.5-Math-1.5B-Instruct"    # v2
+   # "Qwen/Qwen2.5-Math-1.5B-Instruct"    # v2
     "Qwen/Qwen2.5-Math-1.5B"             # v3
     "Qwen/Qwen2.5-0.5B-Instruct"         # v4
     "Qwen/Qwen2.5-0.5B"                  # v5
@@ -34,9 +33,9 @@ echo "============================================================"
 
 python eval_verifier_candidates.py \
     --models "$MODELS_CSV" \
-    --benchmarks math500,amc23,aime24 \
+    --benchmarks math500 \
     --max-new-tokens 3072 \
-    --batch-size 2 \
+    --batch-size 10 \
     --max-samples 100 \
     --output "$OUT" \
     2>&1 | tee "$LOG"
