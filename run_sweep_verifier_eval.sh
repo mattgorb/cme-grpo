@@ -26,7 +26,7 @@ LOG="logs/verifier_capability_$(date +%Y%m%d_%H%M%S).log"
 OUT="verifier_capability.csv"
 
 echo "============================================================"
-echo "Evaluating ${#VERIFIERS[@]} verifiers on math500/amc23/aime24"
+echo "Evaluating ${#VERIFIERS[@]} verifiers on math500"
 echo "  output: $OUT"
 echo "  log:    $LOG"
 echo "============================================================"
