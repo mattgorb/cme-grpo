@@ -1,0 +1,67 @@
+
+#
+model:
+  generator: allenai/OLMo-2-0425-1B-SFT
+  #verifier: Qwen/Qwen2.5-Math-7B
+  verifier: Qwen/Qwen2.5-Math-7B-Instruct
+
+data:
+  train_dataset: DigitalLearningGmbH/MATH-lighteval
+  max_prompt_length: 512
+
+benchmarks:
+  - name: math500
+    dataset: HuggingFaceH4/MATH-500
+    split: test
+    problem_key: problem
+    answer_key: answer
+    num_test_samples: 100
+  # - name: amc23
+  #   dataset: math-ai/amc23
+  #   split: test
+  #   problem_key: question
+  #   answer_key: answer
+  # - name: aime24
+  #   dataset: Maxwell-Jia/AIME_2024
+  #   split: train
+  #   problem_key: Problem
+  #   answer_key: Answer
+
+generation:
+  num_generations: 8
+  temperature: 1.0
+  max_new_tokens: 3072
+  top_p: 1.0
+
+training:
+  learning_rate: 3.0e-6
+  max_grad_norm: 1.0
+  kl_coef: 0 #0.01
+  per_device_train_batch_size: 1
+  gradient_accumulation_steps: 8
+  num_train_epochs: 1
+  max_steps: 5000
+  warmup_steps: 20
+  logging_steps: 1
+  save_steps: 200
+  save_total_limit: 3
+  eval_steps: 200
+  skip_baseline_eval: true
+  output_dir: ./outputs/cme-grpo-config3
+  bf16: true
+  seed: 42
+
+reward:
+  max_verifier_length: 3072
+  token_level: false
+  answer_only_cme: false
+  no_box_penalty: 5
+
+eval:
+  max_new_tokens: 3072
+  temperature: 0.0
+  batch_size: 2
+
+wandb:
+  project: cme-grpo
+  run_name: config3
