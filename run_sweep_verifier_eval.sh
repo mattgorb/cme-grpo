@@ -11,7 +11,7 @@ set -euo pipefail
 mkdir -p logs
 
 VERIFIERS=(
-    "Qwen/Qwen2.5-Math-7B-Instruct"      # v1
+    #"Qwen/Qwen2.5-Math-7B-Instruct"      # v1
     "Qwen/Qwen2.5-Math-1.5B-Instruct"    # v2
     "Qwen/Qwen2.5-Math-1.5B"             # v3
     "Qwen/Qwen2.5-0.5B-Instruct"         # v4
