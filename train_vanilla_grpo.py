@@ -38,7 +38,8 @@ def load_config(path: str) -> dict:
 
 
 def rewrite_paths(cfg: dict) -> dict:
-    """Redirect output_dir and wandb run_name from cme-grpo → vanilla-grpo."""
+    """Redirect output_dir and wandb run_name from cme-grpo → vanilla-grpo,
+    and cap max_steps to 600 for the vanilla baseline."""
     cfg["training"]["output_dir"] = cfg["training"]["output_dir"].replace(
         "cme-grpo", "vanilla-grpo"
     )
@@ -47,6 +48,7 @@ def rewrite_paths(cfg: dict) -> dict:
     )
     if not cfg["wandb"]["run_name"].startswith("vanilla"):
         cfg["wandb"]["run_name"] = "vanilla-" + cfg["wandb"]["run_name"]
+    cfg["training"]["max_steps"] = 600
     return cfg
 
 

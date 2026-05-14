@@ -11,6 +11,7 @@ CONFIGS=(
     "good_configs/config2.yaml"
     "config3.yaml"
     "config3b.yaml"
+    "config4.yaml"
 )
 
 for cfg in "${CONFIGS[@]}"; do
