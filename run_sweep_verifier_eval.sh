@@ -12,7 +12,7 @@ mkdir -p logs
 VERIFIERS=(
     #"Qwen/Qwen2.5-Math-7B-Instruct"      # v1
    # "Qwen/Qwen2.5-Math-1.5B-Instruct"    # v2
-    "Qwen/Qwen2.5-Math-1.5B"             # v3
+   # "Qwen/Qwen2.5-Math-1.5B"             # v3
     "Qwen/Qwen2.5-0.5B-Instruct"         # v4
     "Qwen/Qwen2.5-0.5B"                  # v5
     "meta-llama/Llama-3.1-8B-Instruct"   # v6
