@@ -47,7 +47,7 @@ training:
   save_total_limit: 3
   eval_steps: 200
   skip_baseline_eval: true
-  output_dir: ./outputs/cme-grpo-config3
+  output_dir: ./outputs/cme-grpo-config4
   bf16: true
   seed: 42
 
@@ -64,4 +64,4 @@ eval:
 
 wandb:
   project: cme-grpo
-  run_name: config3
+  run_name: config4
