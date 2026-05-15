@@ -56,7 +56,8 @@ reward:
   token_level: false
   answer_only_cme: false
   no_box_penalty: 5
-
+  reward_metric: 'predictive_entropy'
+  
 eval:
   max_new_tokens: 3072
   temperature: 0.0
