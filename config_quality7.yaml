@@ -37,7 +37,7 @@ training:
   save_total_limit: 3
   eval_steps: 200
   skip_baseline_eval: false
-  output_dir: ./outputs/cme-grpo-quality-config6
+  output_dir: ./outputs/cme-grpo-quality-config7
   bf16: true
   seed: 42
 
@@ -56,4 +56,4 @@ eval:
 
 wandb:
   project: cme-grpo
-  run_name: quality-config6
+  run_name: quality-config7
