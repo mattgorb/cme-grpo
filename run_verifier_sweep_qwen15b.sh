@@ -88,7 +88,7 @@ reward:
 eval:
   max_new_tokens: 3072
   temperature: 0.0
-  batch_size: 2
+  batch_size: 12
 
 wandb:
   project: cme-grpo
