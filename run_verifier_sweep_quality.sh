@@ -53,12 +53,12 @@ training:
   per_device_train_batch_size: 1
   gradient_accumulation_steps: 8
   num_train_epochs: 1
-  max_steps: 600
+  max_steps: 1000
   warmup_steps: 0
   logging_steps: 1
-  save_steps: 150
+  save_steps: 200
   save_total_limit: 3
-  eval_steps: 150
+  eval_steps: 200
   skip_baseline_eval: false
   output_dir: ./outputs/sweep-quality-${label}
   bf16: true
