@@ -6,7 +6,7 @@
 # Eval: LLM judge win rate (finetuned vs base vs instruct)
 
 model:
-  generator: google/gemma-3-270m
+  generator: google/gemma-3-270m-it
   verifier: google/gemma-4-E4B-it
   # For three-way LLM judge comparison
   base: google/gemma-3-270m
