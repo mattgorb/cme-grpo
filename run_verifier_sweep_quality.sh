@@ -13,9 +13,11 @@ mkdir -p logs configs/sweep_quality
 
 # label : description : verifier model
 VERIFIERS=(
-    "q1:random:hf-internal-testing/tiny-random-LlamaForCausalLM"
-    "q2:gemma-270m:google/gemma-3-270m-it"
-    "q3:qwen-1.5b:Qwen/Qwen2.5-1.5B-Instruct"
+    #"q1:random:hf-internal-testing/tiny-random-LlamaForCausalLM"
+    #"q2:gemma-270m:google/gemma-3-270m-it"
+    #"q3:qwen-1.5b:Qwen/Qwen2.5-1.5B-Instruct"
+    "q4:llama-1b:meta-llama/Llama-3.2-1B-Instruct"
+    "q5:olmo-1b-dpo:allenai/OLMo-2-0425-1B-DPO"
 )
 
 for entry in "${VERIFIERS[@]}"; do
