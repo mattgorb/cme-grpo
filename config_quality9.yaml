@@ -1,0 +1,60 @@
+
+# Experiment 2a: Open-ended quality fine-tuning with CME-GRPO
+# Generator: SmolLM2-1.7B-Instruct → train with CME reward
+# Verifier: Gemma-4-E4B-it (frozen, bf16)
+# Dataset: UltraFeedback (instructions only, 5k subset)
+# Eval: LLM judge win rate (finetuned vs base vs instruct)
+# Note: instruct comparator is the same as generator (already instruct-tuned).
+
+model:
+  generator: HuggingFaceTB/SmolLM2-1.7B-Instruct
+  verifier: google/gemma-4-E4B-it
+  # For three-way LLM judge comparison
+  base: HuggingFaceTB/SmolLM2-1.7B
+  instruct: HuggingFaceTB/SmolLM2-1.7B-Instruct
+
+data:
+  train_dataset: openbmb/UltraFeedback
+  max_train_samples: 5000
+  max_prompt_length: 512
+
+generation:
+  num_generations: 8
+  temperature: 1.0
+  max_new_tokens: 2048
+  top_p: 1.0
+
+training:
+  learning_rate: 3.0e-6
+  max_grad_norm: 1.0
+  kl_coef: 0.01
+  per_device_train_batch_size: 1
+  gradient_accumulation_steps: 8
+  num_train_epochs: 1
+  max_steps: 5000
+  warmup_steps: 20
+  logging_steps: 1
+  save_steps: 200
+  save_total_limit: 3
+  eval_steps: 200
+  skip_baseline_eval: false
+  output_dir: ./outputs/cme-grpo-quality-config9
+  bf16: true
+  seed: 42
+
+reward:
+  max_verifier_length: 2048
+  token_level: true
+  answer_only_cme: false
+  #no_box_penalty: 5
+  reward_metric: entropy
+
+eval:
+  max_new_tokens: 2048
+  batch_size: 4
+  judge_model: gpt-5.2
+  judge_num_samples: 50
+
+wandb:
+  project: cme-grpo
+  run_name: quality-config9
