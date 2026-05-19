@@ -16,8 +16,10 @@ VERIFIERS=(
     #"q1:random:hf-internal-testing/tiny-random-LlamaForCausalLM"
     #"q2:gemma-270m:google/gemma-3-270m-it"
     #"q3:qwen-1.5b:Qwen/Qwen2.5-1.5B-Instruct"
-    "q4:llama-1b:meta-llama/Llama-3.2-1B-Instruct"
-    "q5:olmo-1b-dpo:allenai/OLMo-2-0425-1B-DPO"
+    #"q4:llama-1b:meta-llama/Llama-3.2-1B-Instruct"
+    #"q5:olmo-1b-dpo:allenai/OLMo-2-0425-1B-DPO"
+    "q6:qwen-0.5b:Qwen/Qwen2.5-0.5B"
+    "q7:qwen-0.5b-it:Qwen/Qwen2.5-0.5B-Instruct"
 )
 
 for entry in "${VERIFIERS[@]}"; do
