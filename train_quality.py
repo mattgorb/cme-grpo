@@ -323,11 +323,14 @@ def _judge_pairwise(
             "verdict": verdict,         # what the judge replied (A/B/TIE in shown order)
             "reason": reason,
             "raw": raw,
+            "len_a_chars": len(resp_a or ""),
+            "len_b_chars": len(resp_b or ""),
         })
 
     total = wins_a + wins_b + ties
     # AlpacaEval-style winrate: ties count as half-wins for each side.
     # This avoids collapsing "ties" into "losses" when many prompts are judged even.
+    lc_winrate, lc_diag = _length_controlled_winrate(per_sample)
     return {
         "wins_a": wins_a, "wins_b": wins_b, "ties": ties, "total": total,
         "winrate_a": (wins_a + 0.5 * ties) / total if total else 0,
@@ -335,7 +338,77 @@ def _judge_pairwise(
         # Also include the strict-wins-only fraction for reference.
         "strict_winrate_a": wins_a / total if total else 0,
         "strict_winrate_b": wins_b / total if total else 0,
+        # Length-controlled winrate (AlpacaEval 2.0 style): logistic regression
+        # of judge preference against log(len_a / len_b), evaluated at len ratio = 1.
+        # Removes most length-bias contamination from the headline number.
+        "lc_winrate_a": lc_winrate,
+        "lc_diagnostics": lc_diag,
         "per_sample": per_sample,
+    }
+
+
+def _length_controlled_winrate(per_sample: list[dict]) -> tuple[float, dict]:
+    """AlpacaEval 2.0-style length-controlled winrate.
+
+    Fits a logistic regression of P(label_a wins | log(len_a / len_b)) and
+    returns the predicted winrate at log-ratio = 0 (parity in length).
+
+    Ties contribute as 0.5 outcomes. Falls back to plain winrate if the
+    sample is too small or scipy/numpy unavailable.
+    """
+    if not per_sample:
+        return 0.5, {"reason": "no_samples"}
+    try:
+        import numpy as np
+        from scipy.optimize import minimize
+    except Exception:
+        # Fallback: plain winrate.
+        wins_a = sum(1 for r in per_sample if r["winner"] == "a")
+        ties = sum(1 for r in per_sample if r["winner"] == "tie")
+        n = len(per_sample)
+        return ((wins_a + 0.5 * ties) / n) if n else 0.5, {"reason": "no_scipy"}
+
+    log_ratios, outcomes = [], []
+    for r in per_sample:
+        la, lb = r.get("len_a_chars", 0), r.get("len_b_chars", 0)
+        if la <= 0 or lb <= 0:
+            continue
+        log_ratios.append(float(np.log(la / lb)))
+        outcomes.append(1.0 if r["winner"] == "a" else 0.0 if r["winner"] == "b" else 0.5)
+
+    if len(log_ratios) < 5:
+        wins_a = sum(1 for r in per_sample if r["winner"] == "a")
+        ties = sum(1 for r in per_sample if r["winner"] == "tie")
+        n = len(per_sample)
+        return ((wins_a + 0.5 * ties) / n) if n else 0.5, {"reason": "n_too_small"}
+
+    x = np.array(log_ratios, dtype=np.float64)
+    y = np.array(outcomes, dtype=np.float64)
+
+    def _nll(params):
+        b0, b1 = params
+        z = b0 + b1 * x
+        # Numerically stable log-sigmoid via clipping.
+        p = 1.0 / (1.0 + np.exp(-np.clip(z, -30, 30)))
+        p = np.clip(p, 1e-7, 1 - 1e-7)
+        return -float(np.sum(y * np.log(p) + (1 - y) * np.log(1 - p)))
+
+    try:
+        res = minimize(_nll, x0=[0.0, 0.0], method="L-BFGS-B")
+        b0, b1 = float(res.x[0]), float(res.x[1])
+        lc = 1.0 / (1.0 + float(np.exp(-b0)))
+    except Exception as e:
+        wins_a = sum(1 for r in per_sample if r["winner"] == "a")
+        ties = sum(1 for r in per_sample if r["winner"] == "tie")
+        n = len(per_sample)
+        return ((wins_a + 0.5 * ties) / n) if n else 0.5, {"reason": f"fit_failed: {e}"}
+
+    return lc, {
+        "n": int(len(x)),
+        "intercept": b0,
+        "length_coef": b1,
+        "mean_log_ratio": float(x.mean()),
+        "std_log_ratio": float(x.std()),
     }
 
 
@@ -492,8 +565,8 @@ class LLMJudgeEvalCallback(TrainerCallback):
                 }
 
             print(f"[step {state.global_step}] JUDGE RESULTS:")
-            print(f"  vs base:    finetuned wins {vs_base['wins_a']}, base wins {vs_base['wins_b']}, ties {vs_base['ties']} → winrate {vs_base['winrate_a']:.1%}")
-            print(f"  vs instruct: finetuned wins {vs_instruct['wins_a']}, instruct wins {vs_instruct['wins_b']}, ties {vs_instruct['ties']} → winrate {vs_instruct['winrate_a']:.1%}")
+            print(f"  vs base:    finetuned wins {vs_base['wins_a']}, base wins {vs_base['wins_b']}, ties {vs_base['ties']} → winrate {vs_base['winrate_a']:.1%}  (LC {vs_base.get('lc_winrate_a', float('nan')):.1%})")
+            print(f"  vs instruct: finetuned wins {vs_instruct['wins_a']}, instruct wins {vs_instruct['wins_b']}, ties {vs_instruct['ties']} → winrate {vs_instruct['winrate_a']:.1%}  (LC {vs_instruct.get('lc_winrate_a', float('nan')):.1%})")
 
             # Pairwise embedding similarity (computed here so we can log mean
             # values to wandb alongside the judge metrics).
@@ -532,6 +605,8 @@ class LLMJudgeEvalCallback(TrainerCallback):
                     "train/global_step": state.global_step,
                     "eval/winrate_vs_base": vs_base["winrate_a"],
                     "eval/winrate_vs_instruct": vs_instruct["winrate_a"],
+                    "eval/lc_winrate_vs_base": vs_base.get("lc_winrate_a", vs_base["winrate_a"]),
+                    "eval/lc_winrate_vs_instruct": vs_instruct.get("lc_winrate_a", vs_instruct["winrate_a"]),
                     "eval/wins_vs_base": vs_base["wins_a"],
                     "eval/wins_vs_instruct": vs_instruct["wins_a"],
                     "eval/n_finetuned_equals_base": int(sum(identical_to_base)),
@@ -679,6 +754,8 @@ class LLMJudgeEvalCallback(TrainerCallback):
                     "wins_base": vs_base.get("wins_b", 0),
                     "ties": vs_base.get("ties", 0),
                     "winrate_finetuned": vs_base.get("winrate_a", 0.0),
+                    "lc_winrate_finetuned": vs_base.get("lc_winrate_a", vs_base.get("winrate_a", 0.0)),
+                    "lc_diagnostics": vs_base.get("lc_diagnostics", {}),
                 },
                 "judge_vs_instruct_changed_only": {
                     "n_judged": vs_instruct.get("total", 0),
@@ -686,6 +763,8 @@ class LLMJudgeEvalCallback(TrainerCallback):
                     "wins_instruct": vs_instruct.get("wins_b", 0),
                     "ties": vs_instruct.get("ties", 0),
                     "winrate_finetuned": vs_instruct.get("winrate_a", 0.0),
+                    "lc_winrate_finetuned": vs_instruct.get("lc_winrate_a", vs_instruct.get("winrate_a", 0.0)),
+                    "lc_diagnostics": vs_instruct.get("lc_diagnostics", {}),
                     "skipped_identical_to_base": vs_instruct.get("skipped_identical", 0),
                 },
                 "embedding_similarity_stats": {
