@@ -295,7 +295,73 @@ def main():
     trainer.train(resume_from_checkpoint=resume_ckpt)
     trainer.save_model(cfg["training"]["output_dir"])
 
+    # ── Final judge eval (mirrors train_quality.py's FINAL block) ─────────
+    from train_quality import _judge_pairwise
+    print("\n[FINAL] running LLM judge evaluation...", flush=True)
+    model.eval()
+    tokenizer.padding_side = "left"
+    device = next(model.parameters()).device
+    final_responses = _generate_responses_for_eval(
+        model, tokenizer, eval_prompts, str(device), eval_max_tokens,
+    )
+    judge_model = cfg.get("eval", {}).get("judge_model", "gpt-5.2")
+
+    final_vs_base = _judge_pairwise(
+        eval_instructions, final_responses, base_responses,
+        judge_model=judge_model, label_a="finetuned", label_b="base",
+    )
+    final_vs_instruct = _judge_pairwise(
+        eval_instructions, final_responses, instruct_responses,
+        judge_model=judge_model, label_a="finetuned", label_b="instruct",
+    )
+
+    print(f"\nFINAL RESULTS:")
+    print(
+        f"  vs base:     raw winrate {final_vs_base['winrate_a']:.1%}  "
+        f"|  LC winrate {final_vs_base.get('lc_winrate_a', float('nan')):.1%}  "
+        f"({final_vs_base['wins_a']}W / {final_vs_base['wins_b']}L / {final_vs_base['ties']}T)"
+    )
+    print(
+        f"  vs instruct: raw winrate {final_vs_instruct['winrate_a']:.1%}  "
+        f"|  LC winrate {final_vs_instruct.get('lc_winrate_a', float('nan')):.1%}  "
+        f"({final_vs_instruct['wins_a']}W / {final_vs_instruct['wins_b']}L / {final_vs_instruct['ties']}T)"
+    )
+
+    try:
+        os.makedirs(os.path.join(cfg["training"]["output_dir"], "eval_samples"), exist_ok=True)
+        final_summary_path = os.path.join(
+            cfg["training"]["output_dir"], "eval_samples", "final_summary.json",
+        )
+        with open(final_summary_path, "w", encoding="utf-8") as f:
+            _json.dump({
+                "final_vs_base": {
+                    "wins_finetuned": final_vs_base["wins_a"],
+                    "wins_base": final_vs_base["wins_b"],
+                    "ties": final_vs_base["ties"],
+                    "winrate_finetuned": final_vs_base["winrate_a"],
+                    "lc_winrate_finetuned": final_vs_base.get("lc_winrate_a"),
+                    "lc_diagnostics": final_vs_base.get("lc_diagnostics", {}),
+                },
+                "final_vs_instruct": {
+                    "wins_finetuned": final_vs_instruct["wins_a"],
+                    "wins_instruct": final_vs_instruct["wins_b"],
+                    "ties": final_vs_instruct["ties"],
+                    "winrate_finetuned": final_vs_instruct["winrate_a"],
+                    "lc_winrate_finetuned": final_vs_instruct.get("lc_winrate_a"),
+                    "lc_diagnostics": final_vs_instruct.get("lc_diagnostics", {}),
+                },
+            }, f, indent=2)
+        print(f"  → wrote final summary to {final_summary_path}", flush=True)
+    except Exception as e:
+        print(f"  [WARN] failed to write final_summary.json: {e}", flush=True)
+
     if wandb.run is not None:
+        wandb.log({
+            "eval/final_winrate_vs_base": final_vs_base["winrate_a"],
+            "eval/final_winrate_vs_instruct": final_vs_instruct["winrate_a"],
+            "eval/final_lc_winrate_vs_base": final_vs_base.get("lc_winrate_a", final_vs_base["winrate_a"]),
+            "eval/final_lc_winrate_vs_instruct": final_vs_instruct.get("lc_winrate_a", final_vs_instruct["winrate_a"]),
+        })
         wandb.finish()
 
 
