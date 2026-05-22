@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
-# Verifier capability sweep using the config4 (OLMo generator) setup.
+# Verifier capability sweep using the config4 (Llama generator) setup.
 # Three verifier conditions: random, small Qwen-Math, big Qwen-Math.
 # Trains for 600 actual steps but keeps the config4 LR schedule (max_steps=5000)
 # via the early_stop_steps callback in train.py.
 
 set -euo pipefail
 
-mkdir -p logs configs/sweep_olmo
+mkdir -p logs configs/sweep_llama
 
 # label : MATH-500 pass@1 (rough) : verifier model
 VERIFIERS=(
-    "o1:random:hf-internal-testing/tiny-random-LlamaForCausalLM"
-    "o2:65:Qwen/Qwen2.5-Math-1.5B"
-    "o3:83:Qwen/Qwen2.5-Math-7B-Instruct"
+    "l1:random:hf-internal-testing/tiny-random-LlamaForCausalLM"
+    "l2:65:Qwen/Qwen2.5-Math-1.5B"
+    "l3:83:Qwen/Qwen2.5-Math-7B-Instruct"
 )
 
 for entry in "${VERIFIERS[@]}"; do
@@ -20,13 +20,13 @@ for entry in "${VERIFIERS[@]}"; do
     rest="${entry#*:}"
     pass="${rest%%:*}"
     verifier="${rest#*:}"
-    cfg="configs/sweep_olmo/${label}.yaml"
+    cfg="configs/sweep_llama/${label}.yaml"
 
     cat > "$cfg" <<EOF
-# OLMo verifier sweep ${label} — ${verifier} (~${pass}% MATH-500 pass@1)
+# Llama verifier sweep ${label} — ${verifier} (~${pass}% MATH-500 pass@1)
 # Mirrors config4 hyperparameters; trains 600 steps with the 5000-step LR schedule.
 model:
-  generator: allenai/OLMo-2-0425-1B-SFT
+  generator: meta-llama/Llama-3.2-1B-Instruct
   verifier: ${verifier}
 
 data:
@@ -62,7 +62,7 @@ training:
   save_total_limit: 3
   eval_steps: 25
   skip_baseline_eval: true
-  output_dir: ./outputs/sweep-olmo-${label}
+  output_dir: ./outputs/sweep-llama-${label}
   bf16: true
   seed: 42
 
@@ -80,13 +80,13 @@ eval:
 
 wandb:
   project: cme-grpo
-  run_name: sweep-olmo-${label}-$(echo "$verifier" | tr '/' '-')
+  run_name: sweep-llama-${label}-$(echo "$verifier" | tr '/' '-')
 EOF
 
-    log="logs/sweep_olmo_${label}.log"
+    log="logs/sweep_llama_${label}.log"
     echo ""
     echo "============================================================"
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] sweep-olmo ${label}: ${verifier}"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] sweep-llama ${label}: ${verifier}"
     echo "  config: $cfg"
     echo "  log:    $log"
     echo "============================================================"
@@ -96,6 +96,6 @@ done
 
 echo ""
 echo "============================================================"
-echo "All OLMo verifier sweep runs complete."
+echo "All Llama verifier sweep runs complete."
 echo "============================================================"
-ls -1 outputs/sweep-olmo-* 2>/dev/null
+ls -1 outputs/sweep-llama-* 2>/dev/null
