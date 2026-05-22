@@ -27,7 +27,7 @@ from train_quality import (
 )
 
 
-def load_config(path: str = "config_quality_dpo.yaml") -> dict:
+def load_config(path: str = "configs/config_quality1_dpo.yaml") -> dict:
     with open(path) as f:
         return yaml.safe_load(f)
 
@@ -146,7 +146,7 @@ def _generate_responses_for_eval(model, tokenizer, prompts: List[str], device: s
 def main():
     import argparse
     ap = argparse.ArgumentParser()
-    ap.add_argument("--config", default="config_quality_dpo.yaml")
+    ap.add_argument("--config", default="configs/config_quality1_dpo.yaml")
     args = ap.parse_args()
     cfg = load_config(args.config)
 

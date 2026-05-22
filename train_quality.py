@@ -47,7 +47,7 @@ PROMPT_TEMPLATE = (
 )
 
 
-def load_config(path: str = "config_quality1.yaml") -> dict:
+def load_config(path: str = "configs/config_quality1.yaml") -> dict:
     with open(path) as f:
         return yaml.safe_load(f)
 
@@ -852,7 +852,7 @@ def _cache_model_responses(model_name: str, prompts: list[str], device: str, max
 def main():
     import argparse
     ap = argparse.ArgumentParser()
-    ap.add_argument("--config", default="config_quality1.yaml")
+    ap.add_argument("--config", default="configs/config_quality1.yaml")
     args = ap.parse_args()
     cfg = load_config(args.config)
 

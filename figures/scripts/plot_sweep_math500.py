@@ -1,6 +1,9 @@
 """Plot MATH-500 pass@1 eval curves for all unique verifiers in the sweep."""
+from pathlib import Path
 import matplotlib.pyplot as plt
 import wandb
+
+OUT_DIR = Path(__file__).resolve().parent.parent / "out"
 
 EVAL_KEY = "eval/math500_pass@1"
 EVAL_STEPS = [0, 200, 400, 600]  # training steps, evenly spaced
@@ -61,6 +64,6 @@ ax.legend(loc="lower right", fontsize=8, framealpha=0.95,
           title="verifier (own MATH-500 pass@1)", title_fontsize=8)
 
 plt.tight_layout()
-plt.savefig("sweep_math500_curves.png", dpi=200, bbox_inches="tight")
-plt.savefig("sweep_math500_curves.pdf", bbox_inches="tight")
-print("wrote sweep_math500_curves.png / .pdf")
+plt.savefig(OUT_DIR / "sweep_math500_curves.png", dpi=200, bbox_inches="tight")
+plt.savefig(OUT_DIR / "sweep_math500_curves.pdf", bbox_inches="tight")
+print(f"wrote {OUT_DIR}/sweep_math500_curves.png / .pdf")

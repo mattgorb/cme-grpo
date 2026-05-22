@@ -8,10 +8,10 @@ set -euo pipefail
 mkdir -p logs
 
 CONFIGS=(
-    "good_configs/config2.yaml"
-    "config3.yaml"
-    "config3b.yaml"
-    "config4.yaml"
+    "configs/config2.yaml"
+    "configs/config3.yaml"
+    "configs/config3b.yaml"
+    "configs/config4.yaml"
 )
 
 for cfg in "${CONFIGS[@]}"; do

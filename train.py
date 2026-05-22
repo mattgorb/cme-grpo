@@ -66,6 +66,20 @@ class GradientStepPrintCallback(TrainerCallback):
         return control
 
 
+class EarlyStopAtStepCallback(TrainerCallback):
+    # Stop training when global_step reaches `stop_at`, while leaving the LR
+    # scheduler horizon (max_steps) untouched. Lets a run use a long-horizon
+    # schedule but terminate early.
+    def __init__(self, stop_at: int):
+        self.stop_at = stop_at
+
+    def on_step_end(self, args, state, control, **kwargs):
+        if state.global_step >= self.stop_at:
+            print(f"[early-stop] reached step {state.global_step} >= {self.stop_at}, stopping.", flush=True)
+            control.should_training_stop = True
+        return control
+
+
 class PeriodicEvalCallback(TrainerCallback):
     def __init__(self, cfg: dict, eval_steps: int, baseline_samples=None, verifier_tokenizer=None):
         self.cfg = cfg
@@ -273,10 +287,17 @@ def main():
         reward_funcs=reward_fn,
         args=grpo_cfg,
         train_dataset=train_ds,
-        callbacks=[
-            GradientStepPrintCallback(),
-            PeriodicEvalCallback(cfg, cfg["training"]["eval_steps"], baseline_samples=baseline_samples, verifier_tokenizer=reward_model.tokenizer),
-        ],
+        callbacks=(
+            [
+                GradientStepPrintCallback(),
+                PeriodicEvalCallback(cfg, cfg["training"]["eval_steps"], baseline_samples=baseline_samples, verifier_tokenizer=reward_model.tokenizer),
+            ]
+            + (
+                [EarlyStopAtStepCallback(int(cfg["training"]["early_stop_steps"]))]
+                if cfg["training"].get("early_stop_steps")
+                else []
+            )
+        ),
     )
 
     if not cfg["training"].get("skip_baseline_eval", False):

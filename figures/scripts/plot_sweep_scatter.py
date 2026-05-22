@@ -8,7 +8,10 @@ V8 (OLMo-2) is plotted at its measured value of 0% but marked as a parsing
 caveat — its raw eval failed to extract \\boxed answers, not because the
 model can't do math.
 """
+from pathlib import Path
 import matplotlib.pyplot as plt
+
+OUT_DIR = Path(__file__).resolve().parent.parent / "out"
 
 # label : verifier name : verifier MATH-500 pass@1 : trained gen MATH-500 pass@1 : family
 SWEEP = [
@@ -91,14 +94,14 @@ for label, name, vcap, gcap, fam in SWEEP:
                 textcoords="offset points", fontsize=10, color=color,
                 fontweight="bold", ha=ha)
 
-ax.set_xlabel("Verifier MATH-500 pass@1 (%)", fontsize=14)
-ax.set_ylabel("Generator MATH-500 pass@1", fontsize=14)
-ax.tick_params(axis="both", labelsize=11)
+ax.set_xlabel("Verifier MATH-500 pass@1 (%)", fontsize=17)
+ax.set_ylabel("Generator MATH-500 pass@1", fontsize=17)
+ax.tick_params(axis="both", labelsize=14)
 ax.set_xlim(-3, 82)
 ax.set_ylim(0.42, 0.66)
 ax.grid(True, alpha=0.3)
 
 plt.tight_layout()
-plt.savefig("sweep_math500_scatter.png", dpi=200, bbox_inches="tight")
-plt.savefig("sweep_math500_scatter.pdf", bbox_inches="tight")
-print(f"wrote sweep_math500_scatter.png / .pdf  (slope = {slope:+.4f})")
+plt.savefig(OUT_DIR / "sweep_math500_scatter.png", dpi=200, bbox_inches="tight")
+plt.savefig(OUT_DIR / "sweep_math500_scatter.pdf", bbox_inches="tight")
+print(f"wrote {OUT_DIR}/sweep_math500_scatter.png / .pdf  (slope = {slope:+.4f})")

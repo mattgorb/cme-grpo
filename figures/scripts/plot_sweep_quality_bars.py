@@ -4,17 +4,22 @@ Generator: Qwen/Qwen2.5-0.5B. Six verifier conditions across four families
 plus a random-weighted control. Two bars per condition: finetuned win rate
 vs the base comparator and vs the instruct comparator. Judge: gpt-5.2.
 """
+from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
+OUT_DIR = Path(__file__).resolve().parent.parent / "out"
+
 # label : display name : family : WR vs base (%) : WR vs instruct (%)
 SWEEP = [
-    ("q1", "random\n(~tiny)",                   "Random", 55.8, 22.8),
-    ("q2", "gemma-3-270m-it\n(270M)",           "Gemma",  59.2, 27.0),
-    ("q5", "OLMo-2-1B-DPO\n(1B)",               "OLMo",   65.0, 32.2),
-    ("q4", "Llama-3.2-1B-Instruct\n(1B)",       "Llama",  70.0, 32.0),
-    ("q3", "Qwen2.5-1.5B-Instruct\n(1.5B)",     "Qwen",   64.2, 25.8),
-    ("q6", "gemma-4-E4B-it\n(~4B)",             "Gemma",  70.0, 34.0),
+    ("q1", "random",                    "Random", 55.8, 22.8),
+    ("q2", "gemma-3-270m-it",           "Gemma",  59.2, 27.0),
+    ("q6b", "Qwen2.5-0.5B",             "Qwen",   63.0, 25.2),
+    ("q7", "Qwen2.5-0.5B-Instruct",     "Qwen",   64.2, 27.8),
+    ("q5", "OLMo-2-1B-DPO",             "OLMo",   65.0, 32.2),
+    ("q4", "Llama-3.2-1B-Instruct",     "Llama",  70.0, 32.0),
+    ("q3", "Qwen2.5-1.5B-Instruct",     "Qwen",   64.2, 25.8),
+    ("q6", "gemma-4-E4B-it",            "Gemma",  70.0, 34.0),
 ]
 
 FAMILY_COLOR = {
@@ -58,8 +63,8 @@ for bars, vals in [(bars_base, wr_base), (bars_instr, wr_instr)]:
                 fontweight="bold")
 
 ax.set_xticks(x)
-ax.set_xticklabels(labels, fontsize=10, rotation=25, ha="right")
-ax.set_ylabel("Finetuned-generator win rate (%)", fontsize=14)
+ax.set_xticklabels(labels, fontsize=15, rotation=25, ha="right")
+ax.set_ylabel("Generator (Qwen2.5-0.5B) winrate (%)", fontsize=14)
 ax.tick_params(axis="y", labelsize=11)
 ax.set_ylim(0, 82)
 ax.grid(True, axis="y", alpha=0.3)
@@ -73,6 +78,6 @@ legend_handles = [
 ax.legend(handles=legend_handles, loc="upper left", fontsize=12, framealpha=0.95)
 
 plt.tight_layout()
-plt.savefig("sweep_quality_winrates.png", dpi=200, bbox_inches="tight")
-plt.savefig("sweep_quality_winrates.pdf", bbox_inches="tight")
-print("wrote sweep_quality_winrates.png / .pdf")
+plt.savefig(OUT_DIR / "sweep_quality_winrates.png", dpi=200, bbox_inches="tight")
+plt.savefig(OUT_DIR / "sweep_quality_winrates.pdf", bbox_inches="tight")
+print(f"wrote {OUT_DIR}/sweep_quality_winrates.png / .pdf")
