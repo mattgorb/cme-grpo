@@ -5,6 +5,7 @@
 
 set -euo pipefail
 
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 WORKSPACE="${WORKSPACE:-/workspace}"
 CACHE_ROOT="$WORKSPACE/.cache"
 
@@ -88,7 +89,7 @@ fi
 
 # Strip torch line(s) from requirements so the rest of the install never
 # overrides whatever torch we just confirmed/installed.
-grep -viE '^[[:space:]]*torch([[:space:]<>=!]|$)' "$(dirname "$0")/requirements.txt" > /tmp/requirements_no_torch.txt
+grep -viE '^[[:space:]]*torch([[:space:]<>=!]|$)' "$REPO_ROOT/requirements.txt" > /tmp/requirements_no_torch.txt
 pip install -r /tmp/requirements_no_torch.txt
 
 echo "[install] sanity-checking imports"
