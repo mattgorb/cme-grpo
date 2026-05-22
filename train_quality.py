@@ -37,8 +37,6 @@ from transformers import (
 )
 from trl import GRPOConfig, GRPOTrainer
 
-from cme_trainer import RENTGRPOTrainer
-
 from reward import CMERewardModel
 
 
@@ -111,6 +109,68 @@ def _format_prompt_for_quality_verifier(instruction: str, verifier_tokenizer) ->
             msgs, tokenize=False, add_generation_prompt=True,
         )
     return PROMPT_TEMPLATE.format(instruction=instruction)
+
+
+def build_rent_reward_fn(model, tokenizer, max_length: int = 2048):
+    """Reward fn implementing RENT (rent-rl.github.io): R = -sum_t H_t where H_t
+    is the predictive entropy of the *policy itself* at completion position t.
+
+    Computes entropy via a no-grad forward pass on the policy model. Called once
+    per generation batch (all G rollouts visible); TRL then group-normalizes the
+    scalar rewards into advantages internally.
+    """
+    _call_count = [0]
+
+    @torch.no_grad()
+    def reward_fn(prompts, completions, **kwargs) -> List[float]:
+        # Coerce list-of-messages format → strings (mirrors build_quality_reward_fn).
+        prompt_texts: List[str] = []
+        completion_texts: List[str] = []
+        for p, c in zip(prompts, completions):
+            if isinstance(p, list):
+                p = "\n".join(m.get("content", "") for m in p)
+            if isinstance(c, list):
+                c = "\n".join(m.get("content", "") for m in c)
+            prompt_texts.append(p)
+            completion_texts.append(c)
+
+        device = next(model.parameters()).device
+        was_training = model.training
+        model.eval()
+
+        rewards: List[float] = []
+        try:
+            for prompt, completion in zip(prompt_texts, completion_texts):
+                p_ids = tokenizer(prompt, return_tensors="pt", truncation=True,
+                                  max_length=max_length, add_special_tokens=False)["input_ids"]
+                c_ids = tokenizer(completion, return_tensors="pt", truncation=True,
+                                  max_length=max_length, add_special_tokens=False)["input_ids"]
+                full_ids = torch.cat([p_ids, c_ids], dim=1).to(device)
+                P = p_ids.shape[1]
+                if full_ids.shape[1] - P <= 0:
+                    rewards.append(0.0)
+                    continue
+
+                logits = model(input_ids=full_ids).logits  # [1, L, V]
+                # logits at position t predict token at t+1; completion span starts at P.
+                comp_logits = logits[:, P - 1 : -1, :]  # [1, T_comp, V]
+                log_probs = torch.log_softmax(comp_logits, dim=-1)
+                per_tok_H = -(log_probs.exp() * log_probs).sum(dim=-1)  # [1, T_comp]
+                neg_H = -per_tok_H.sum().item()
+                rewards.append(neg_H)
+        finally:
+            if was_training:
+                model.train()
+
+        if _call_count[0] < 3:
+            print(f"[DEBUG rent reward_fn call {_call_count[0]}] "
+                  f"R mean={sum(rewards)/len(rewards):.2f} "
+                  f"min={min(rewards):.2f} max={max(rewards):.2f}", flush=True)
+            _call_count[0] += 1
+
+        return rewards
+
+    return reward_fn
 
 
 def build_quality_reward_fn(reward_model: CMERewardModel, reward_metric: str = "entropy"):
@@ -877,13 +937,15 @@ def main():
     reward_metric = cfg.get("reward", {}).get("reward_metric", "entropy")
 
     if reward_metric == "rent":
-        # RENT baseline: reward computed inside the trainer from the policy's
-        # own logits — no verifier loaded, no external reward signal. A dummy
-        # reward_fn is passed because TRL's GRPOTrainer requires reward_funcs;
-        # RENTGRPOTrainer.compute_loss ignores it.
+        # RENT baseline (rent-rl.github.io): reward = -H of the policy itself,
+        # computed by the reward_fn via a no-grad forward pass. No verifier
+        # loaded. TRL handles group-relative advantage normalization downstream.
         reward_model = None
-        reward_fn = lambda prompts, completions, **kwargs: [0.0] * len(completions)
-        print("[train] reward_metric=rent — skipping verifier load (using policy entropy)", flush=True)
+        reward_fn = build_rent_reward_fn(
+            model, tokenizer,
+            max_length=cfg["reward"].get("max_verifier_length", 2048),
+        )
+        print("[train] reward_metric=rent — skipping verifier; using policy entropy", flush=True)
     else:
         # Verifier on separate GPU if available.
         verifier_device = "cuda:1" if torch.cuda.device_count() > 1 else (
@@ -1045,8 +1107,7 @@ def main():
         instruct_responses=instruct_responses,
     )
 
-    TrainerCls = RENTGRPOTrainer if reward_metric == "rent" else GRPOTrainer
-    trainer = TrainerCls(
+    trainer = GRPOTrainer(
         model=model,
         processing_class=tokenizer,
         reward_funcs=reward_fn,
