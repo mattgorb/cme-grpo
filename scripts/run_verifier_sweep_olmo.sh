@@ -58,9 +58,9 @@ training:
   early_stop_steps: 600    # actually stop here
   warmup_steps: 20
   logging_steps: 1
-  save_steps: 200
+  save_steps: 25
   save_total_limit: 3
-  eval_steps: 200
+  eval_steps: 25
   skip_baseline_eval: true
   output_dir: ./outputs/sweep-olmo-${label}
   bf16: true
