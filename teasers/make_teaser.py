@@ -525,6 +525,89 @@ def paper_figure(
     print(f"wrote {output_path}")
 
 
+def paper_figure_bars_only(
+    df: pd.DataFrame,
+    stats: pd.DataFrame,
+    output_path: str,
+    bar_datasets: tuple[str, str] = ("math500", "amc23"),
+) -> None:
+    # Two-panel variant of paper_figure: the bar panels only, no density plot
+    # and no (a)/(b) panel-letter labels.
+    stats = stats[(stats["n_correct"] >= 3) & (stats["n_wrong"] >= 3)].reset_index(drop=True)
+    if stats.empty:
+        print(f"no valid (model, benchmark) pairs for {output_path}")
+        return
+
+    plt.rcParams.update({
+        "font.family": "serif",
+        "font.serif": ["Times New Roman", "Times", "DejaVu Serif"],
+        "font.size": 9,
+        "axes.labelsize": 10,
+        "axes.titlesize": 10,
+        "legend.fontsize": 8,
+        "xtick.labelsize": 8,
+        "ytick.labelsize": 8,
+        "axes.spines.top": False,
+        "axes.spines.right": False,
+        "pdf.fonttype": 42,
+        "ps.fonttype": 42,
+    })
+
+    c_gen = "#a0a0a0"
+    c_ver = "#4c78a8"
+    c_chance = "#d62728"
+
+    fig, (ax_a, ax_b) = plt.subplots(1, 2, figsize=(9, 4.0))
+
+    bar_exclusions = {"math500": {"gemma-2-2b"}}
+
+    def _draw_bar_panel(ax, bench: str) -> None:
+        sub = stats[stats["benchmark"] == bench]
+        excluded = bar_exclusions.get(bench, set())
+        if excluded:
+            sub = sub[~sub["generator"].isin(excluded)]
+        sub = sub.sort_values("generator").reset_index(drop=True)
+        if sub.empty:
+            ax.text(0.5, 0.5, f"(no data for {bench})", transform=ax.transAxes,
+                    ha="center", va="center", fontsize=10, color="gray")
+            ax.set_xticks([])
+            ax.set_yticks([])
+            ax.set_title(bench, fontsize=10)
+            return
+        x = np.arange(len(sub))
+        w = 0.38
+        ax.bar(x - w / 2, sub["ce_gen_answer_auroc"], w,
+               color=c_gen, edgecolor="black", linewidth=0.6,
+               label="generator self-CE")
+        ax.bar(x + w / 2, sub["ce_ver_answer_auroc"], w,
+               color=c_ver, edgecolor="black", linewidth=0.6,
+               label="verifier CE (CME)")
+        ax.axhline(0.5, color=c_chance, linestyle="--", linewidth=0.8, alpha=0.7)
+        ax.set_ylim(0.4, 1.0)
+        ax.set_xticks(x)
+        ax.set_xticklabels(sub["generator"], rotation=30, ha="right", fontsize=8)
+        ax.set_ylabel("AUROC (wrong $>$ correct)")
+        ax.set_title(bench, fontsize=11)
+        ax.grid(axis="y", alpha=0.25, linewidth=0.5)
+        for xi, v in zip(x - w / 2, sub["ce_gen_answer_auroc"]):
+            if not np.isnan(v):
+                ax.text(xi, v + 0.01, f"{v:.2f}", ha="center", va="bottom", fontsize=7)
+        for xi, v in zip(x + w / 2, sub["ce_ver_answer_auroc"]):
+            if not np.isnan(v):
+                ax.text(xi, v + 0.01, f"{v:.2f}", ha="center", va="bottom", fontsize=7)
+
+    bench_a = bar_datasets[0] if len(bar_datasets) >= 1 else "math500"
+    bench_b = bar_datasets[1] if len(bar_datasets) >= 2 else "amc23"
+    _draw_bar_panel(ax_a, bench_a)
+    _draw_bar_panel(ax_b, bench_b)
+    ax_a.legend(loc="lower right", fontsize=8, frameon=True)
+
+    plt.tight_layout()
+    plt.savefig(output_path, bbox_inches="tight", format="pdf")
+    plt.close()
+    print(f"wrote {output_path}")
+
+
 def plot_scatter(df: pd.DataFrame, output_path: str) -> None:
     """Scatter: ce_gen_answer (x) vs ce_ver_answer (y), colored by correctness,
     faceted by (generator, benchmark)."""
@@ -632,6 +715,11 @@ def main():
         paper_figure(
             perrow_df_valid, stats,
             os.path.join(args.output_dir, "math_reasoning_motivation.pdf"),
+            bar_datasets=bar_ds[:2] if len(bar_ds) >= 2 else ("math500", "amc23"),
+        )
+        paper_figure_bars_only(
+            perrow_df_valid, stats,
+            os.path.join(args.output_dir, "math_reasoning_motivation_bars_only.pdf"),
             bar_datasets=bar_ds[:2] if len(bar_ds) >= 2 else ("math500", "amc23"),
         )
     else:

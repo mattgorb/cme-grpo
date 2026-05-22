@@ -1,11 +1,8 @@
-"""Custom GRPOTrainer that uses per-token CME advantages.
+"""Custom GRPOTrainer subclasses for CME and RENT.
 
-Overrides advantage computation to use token-level rewards from the CME reward fn
-rather than scalar sequence-level advantages.
-
-For each position t, advantage_{i,t} = (r_{i,t} - mean_t) / (std_t + 1e-8)
-where mean_t and std_t are computed across the G responses at that position.
-Shorter responses are padded with zero advantage.
+CMETokenLevelGRPOTrainer: uses per-token CME advantages from the reward fn.
+RENTGRPOTrainer: uses negative predictive entropy of the policy itself as the
+reward (rent-rl.github.io), with group-relative advantage normalization.
 """
 
 from __future__ import annotations
@@ -140,6 +137,92 @@ class CMETokenLevelGRPOTrainer(GRPOTrainer):
             "advantage_mean": float((adv * mask).sum().item() / mask_sum.item()),
             "advantage_abs_mean": float((adv.abs() * mask).sum().item() / mask_sum.item()),
             "active_frac": float(active.sum().item() / mask_sum.item()),
+        }
+        if mean_kl is not None:
+            log_dict["kl_ref"] = float(mean_kl.detach().item())
+        try:
+            self.log(log_dict)
+        except Exception:
+            pass
+
+        return loss
+
+
+class RENTGRPOTrainer(GRPOTrainer):
+    """GRPO with reward = -H(π) from the policy's own logits (RENT baseline).
+
+    Reward per completion is the sequence-summed negative predictive entropy
+    R = -sum_t H_t = sum_t sum_v p_t(v) log p_t(v). Advantage is the standard
+    group-relative normalization across `num_generations` rollouts. No external
+    reward_fn / verifier is used (any reward_funcs passed are ignored).
+    """
+
+    def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
+        prompt_ids = inputs["prompt_ids"]
+        prompt_mask = inputs["prompt_mask"]
+        completion_ids = inputs["completion_ids"]
+        completion_mask = inputs["completion_mask"]
+
+        full_ids = torch.cat([prompt_ids, completion_ids], dim=1)
+        attn_mask = torch.cat([prompt_mask, completion_mask], dim=1)
+
+        outputs = model(input_ids=full_ids, attention_mask=attn_mask)
+        logits = outputs.logits[:, :-1, :]
+        targets = full_ids[:, 1:]
+
+        P = prompt_ids.shape[1]
+        comp_logits = logits[:, P - 1 :, :]
+        comp_targets = targets[:, P - 1 :]
+        log_probs = torch.log_softmax(comp_logits, dim=-1)
+        per_token_logp = log_probs.gather(-1, comp_targets.unsqueeze(-1)).squeeze(-1)
+        per_token_entropy = -(log_probs.exp() * log_probs).sum(dim=-1)
+
+        mask = completion_mask.float()
+        T = min(per_token_logp.shape[1], mask.shape[1])
+        per_token_logp = per_token_logp[:, :T]
+        per_token_entropy = per_token_entropy[:, :T]
+        mask = mask[:, :T]
+
+        # R = -sum_t H_t per completion. Detach so the *reward* isn't part of
+        # the gradient — only the log-prob path is, like standard PG.
+        seq_neg_entropy = -(per_token_entropy * mask).sum(dim=1).detach()  # [N]
+
+        # Group-relative advantage normalization across num_generations rollouts.
+        G = self.args.num_generations
+        N = seq_neg_entropy.shape[0]
+        if N % G != 0:
+            raise RuntimeError(f"batch size {N} not divisible by num_generations {G}")
+        groups = seq_neg_entropy.view(-1, G)
+        group_mean = groups.mean(dim=1, keepdim=True)
+        group_std = groups.std(dim=1, keepdim=True).clamp(min=1e-8)
+        advantages = ((groups - group_mean) / group_std).view(N)
+
+        # PG loss: per-sequence advantage * sum_t log p_t (masked), averaged over completions.
+        per_seq_logp = (per_token_logp * mask).sum(dim=1)
+        loss = -(advantages * per_seq_logp).mean()
+
+        # Mean entropy over completion tokens (for logging).
+        mask_sum = mask.sum().clamp(min=1.0)
+        mean_entropy = (per_token_entropy * mask).sum() / mask_sum
+
+        # Optional KL to reference model (if TRL set one up).
+        mean_kl = None
+        ref_model = getattr(self, "ref_model", None)
+        if ref_model is not None:
+            with torch.no_grad():
+                ref_outputs = ref_model(input_ids=full_ids, attention_mask=attn_mask)
+                ref_log_probs = torch.log_softmax(
+                    ref_outputs.logits[:, :-1, :][:, P - 1 :, :], dim=-1
+                )[:, :T, :]
+            policy_probs = log_probs[:, :T, :].exp()
+            per_tok_kl = (policy_probs * (log_probs[:, :T, :] - ref_log_probs)).sum(dim=-1)
+            mean_kl = (per_tok_kl * mask).sum() / mask_sum
+
+        log_dict = {
+            "policy_entropy": float(mean_entropy.detach().item()),
+            "rent_reward_mean": float(seq_neg_entropy.mean().item()),
+            "rent_reward_std": float(seq_neg_entropy.std().item()),
+            "advantage_abs_mean": float(advantages.abs().mean().item()),
         }
         if mean_kl is not None:
             log_dict["kl_ref"] = float(mean_kl.detach().item())

@@ -37,6 +37,8 @@ from transformers import (
 )
 from trl import GRPOConfig, GRPOTrainer
 
+from cme_trainer import RENTGRPOTrainer
+
 from reward import CMERewardModel
 
 
@@ -872,17 +874,27 @@ def main():
         gen_name, torch_dtype=torch.bfloat16,
     )
 
-    # Verifier on separate GPU if available.
-    verifier_device = "cuda:1" if torch.cuda.device_count() > 1 else (
-        "cuda:0" if torch.cuda.is_available() else "cpu"
-    )
-    reward_model = CMERewardModel(
-        verifier_name=cfg["model"]["verifier"],
-        device=verifier_device,
-        max_length=cfg["reward"]["max_verifier_length"],
-    )
     reward_metric = cfg.get("reward", {}).get("reward_metric", "entropy")
-    reward_fn = build_quality_reward_fn(reward_model, reward_metric=reward_metric)
+
+    if reward_metric == "rent":
+        # RENT baseline: reward computed inside the trainer from the policy's
+        # own logits — no verifier loaded, no external reward signal. A dummy
+        # reward_fn is passed because TRL's GRPOTrainer requires reward_funcs;
+        # RENTGRPOTrainer.compute_loss ignores it.
+        reward_model = None
+        reward_fn = lambda prompts, completions, **kwargs: [0.0] * len(completions)
+        print("[train] reward_metric=rent — skipping verifier load (using policy entropy)", flush=True)
+    else:
+        # Verifier on separate GPU if available.
+        verifier_device = "cuda:1" if torch.cuda.device_count() > 1 else (
+            "cuda:0" if torch.cuda.is_available() else "cpu"
+        )
+        reward_model = CMERewardModel(
+            verifier_name=cfg["model"]["verifier"],
+            device=verifier_device,
+            max_length=cfg["reward"]["max_verifier_length"],
+        )
+        reward_fn = build_quality_reward_fn(reward_model, reward_metric=reward_metric)
 
     train_ds = build_train_dataset(cfg, tokenizer)
 
@@ -1033,7 +1045,8 @@ def main():
         instruct_responses=instruct_responses,
     )
 
-    trainer = GRPOTrainer(
+    TrainerCls = RENTGRPOTrainer if reward_metric == "rent" else GRPOTrainer
+    trainer = TrainerCls(
         model=model,
         processing_class=tokenizer,
         reward_funcs=reward_fn,
