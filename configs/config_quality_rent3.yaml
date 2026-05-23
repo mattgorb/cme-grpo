@@ -1,0 +1,61 @@
+
+# RENT baseline (rent-rl.github.io) — v3, cross-family instruct.
+# Same setup as rent2 but with a different instruct family: Llama-3.2-1B-Instruct.
+# Pairs with the Llama-3.2-1B-It row in the quality table so RENT and CME can be
+# compared on the same generator. Larger (1B vs 0.5B) and different tokenizer/
+# training data than the Qwen runs — checks whether RENT's open-ended behavior
+# is family-specific or a general property of the entropy-only signal.
+
+model:
+  generator: meta-llama/Llama-3.2-1B-Instruct
+  # `verifier` is unused when reward_metric: rent.
+  verifier: meta-llama/Llama-3.2-1B-Instruct
+  # For three-way LLM judge comparison in eval_quality.py.
+  base: meta-llama/Llama-3.2-1B
+  instruct: meta-llama/Llama-3.2-1B-Instruct
+
+data:
+  train_dataset: openbmb/UltraFeedback
+  max_train_samples: 5000
+  max_prompt_length: 512
+
+generation:
+  num_generations: 8
+  temperature: 1.0
+  max_new_tokens: 2048
+  top_p: 1.0
+
+training:
+  learning_rate: 3.0e-6
+  max_grad_norm: 1.0
+  kl_coef: 0.05
+  per_device_train_batch_size: 1
+  gradient_accumulation_steps: 8
+  num_train_epochs: 1
+  max_steps: 5000          # scheduler horizon
+  early_stop_steps: 1000   # actually stop here
+  warmup_steps: 20
+  logging_steps: 1
+  save_steps: 200
+  save_total_limit: 3
+  eval_steps: 200
+  skip_baseline_eval: false
+  output_dir: ./outputs/rent3-quality-llama1b-it
+  bf16: true
+  seed: 42
+
+reward:
+  max_verifier_length: 2048
+  token_level: true
+  answer_only_cme: false
+  reward_metric: rent
+
+eval:
+  max_new_tokens: 2048
+  batch_size: 4
+  judge_model: gpt-5.2
+  judge_num_samples: 50
+
+wandb:
+  project: cme-grpo
+  run_name: rent3-quality-llama1b-it

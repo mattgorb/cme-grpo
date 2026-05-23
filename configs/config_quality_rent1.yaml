@@ -1,7 +1,11 @@
 
-# RENT baseline (rent-rl.github.io): reward = -H(π) of the policy itself,
-# no verifier. Matches config_quality1 hyperparameters so the result is
-# directly comparable to the corresponding CME run.
+# RENT baseline (rent-rl.github.io) — v1, length-fair.
+# Same as the original config_quality_rent.yaml but with two changes that
+# address the length-collapse failure observed in the first run:
+#   - reward uses MEAN-pooled entropy (in build_rent_reward_fn) instead of
+#     sum, removing the incentive to shorten outputs.
+#   - KL coefficient bumped 0.01 -> 0.05 to anchor more strongly to the ref
+#     policy while the new reward direction takes hold.
 
 model:
   generator: Qwen/Qwen2.5-0.5B
@@ -26,7 +30,7 @@ generation:
 training:
   learning_rate: 3.0e-6
   max_grad_norm: 1.0
-  kl_coef: 0.01
+  kl_coef: 0.05
   per_device_train_batch_size: 1
   gradient_accumulation_steps: 8
   num_train_epochs: 1
@@ -37,7 +41,7 @@ training:
   save_total_limit: 3
   eval_steps: 200
   skip_baseline_eval: false
-  output_dir: ./outputs/rent-quality-qwen0.5b
+  output_dir: ./outputs/rent1-quality-qwen0.5b
   bf16: true
   seed: 42
 
@@ -55,4 +59,4 @@ eval:
 
 wandb:
   project: cme-grpo
-  run_name: rent-quality-qwen0.5b
+  run_name: rent1-quality-qwen0.5b

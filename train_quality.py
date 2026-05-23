@@ -156,7 +156,10 @@ def build_rent_reward_fn(model, tokenizer, max_length: int = 2048):
                 comp_logits = logits[:, P - 1 : -1, :]  # [1, T_comp, V]
                 log_probs = torch.log_softmax(comp_logits, dim=-1)
                 per_tok_H = -(log_probs.exp() * log_probs).sum(dim=-1)  # [1, T_comp]
-                neg_H = -per_tok_H.sum().item()
+                # Mean over completion tokens (length-neutral). Paper sums, but
+                # sum-pooling causes length collapse on open-ended generation —
+                # shorter outputs trivially raise reward. Mean is length-fair.
+                neg_H = -per_tok_H.mean().item()
                 rewards.append(neg_H)
         finally:
             if was_training:
@@ -472,6 +475,20 @@ def _length_controlled_winrate(per_sample: list[dict]) -> tuple[float, dict]:
         "mean_log_ratio": float(x.mean()),
         "std_log_ratio": float(x.std()),
     }
+
+
+class EarlyStopAtStepCallback(TrainerCallback):
+    # Stop training when global_step reaches `stop_at`, leaving the LR scheduler
+    # horizon (max_steps) untouched. Lets a run use a long-horizon schedule but
+    # terminate early.
+    def __init__(self, stop_at: int):
+        self.stop_at = stop_at
+
+    def on_step_end(self, args, state, control, **kwargs):
+        if state.global_step >= self.stop_at:
+            print(f"[early-stop] reached step {state.global_step} >= {self.stop_at}, stopping.", flush=True)
+            control.should_training_stop = True
+        return control
 
 
 class LLMJudgeEvalCallback(TrainerCallback):
@@ -1113,7 +1130,14 @@ def main():
         reward_funcs=reward_fn,
         args=grpo_cfg,
         train_dataset=train_ds,
-        callbacks=[eval_callback],
+        callbacks=(
+            [eval_callback]
+            + (
+                [EarlyStopAtStepCallback(int(cfg["training"]["early_stop_steps"]))]
+                if cfg["training"].get("early_stop_steps")
+                else []
+            )
+        ),
     )
     # Inject trainer reference so the callback can use trainer.save_model()
     # which handles wrapped/DDP models correctly. Without this, the callback

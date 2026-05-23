@@ -1,0 +1,64 @@
+
+# RENT baseline (rent-rl.github.io) — v2, fairer setup.
+# Builds on the length-collapse fix from rent1 by starting from the *instruct*
+# checkpoint instead of the raw base. RENT requires an inductive prior that
+# "confident == good"; an instruct-tuned model already has a coherent
+# low-entropy mode aligned with helpful answers, which gives RENT a fair shot.
+# Pretrain-only models (Qwen2.5-0.5B) collapse to degenerate low-entropy
+# regions (looping, EOS, templates) that have nothing to do with quality.
+
+model:
+  generator: Qwen/Qwen2.5-0.5B-Instruct
+  # `verifier` is unused when reward_metric: rent (no verifier is loaded);
+  # the key is read by downstream code, so set to a placeholder.
+  verifier: Qwen/Qwen2.5-0.5B-Instruct
+  # For three-way LLM judge comparison in eval_quality.py (unchanged so this
+  # is comparable to the rent1 / CME runs).
+  base: Qwen/Qwen2.5-0.5B
+  instruct: Qwen/Qwen2.5-0.5B-Instruct
+
+data:
+  train_dataset: openbmb/UltraFeedback
+  max_train_samples: 5000
+  max_prompt_length: 512
+
+generation:
+  num_generations: 8
+  temperature: 1.0
+  max_new_tokens: 2048
+  top_p: 1.0
+
+training:
+  learning_rate: 3.0e-6
+  max_grad_norm: 1.0
+  kl_coef: 0.05
+  per_device_train_batch_size: 1
+  gradient_accumulation_steps: 8
+  num_train_epochs: 1
+  max_steps: 5000          # scheduler horizon
+  early_stop_steps: 1000   # actually stop here
+  warmup_steps: 20
+  logging_steps: 1
+  save_steps: 200
+  save_total_limit: 3
+  eval_steps: 200
+  skip_baseline_eval: false
+  output_dir: ./outputs/rent2-quality-qwen0.5b-it
+  bf16: true
+  seed: 42
+
+reward:
+  max_verifier_length: 2048
+  token_level: true
+  answer_only_cme: false
+  reward_metric: rent
+
+eval:
+  max_new_tokens: 2048
+  batch_size: 4
+  judge_model: gpt-5.2
+  judge_num_samples: 50
+
+wandb:
+  project: cme-grpo
+  run_name: rent2-quality-qwen0.5b-it
