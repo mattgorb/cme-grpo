@@ -14,12 +14,17 @@ JUDGES=${JUDGES:-gpt-5.2,claude-sonnet-4-6}
 set -euo pipefail
 mkdir -p results logs data
 
-echo "=== Exp 3 teacher generation (light, run first / overnight day 0) ==="
-python scripts/gen_teacher_data.py \
-  --config configs/config_exp1c_qwen_revkl.yaml \
-  --teacher google/gemma-4-E4B-it \
-  --out data/teacher_sft_qwenprompts.jsonl \
-  --temperature 0.7 --max-new-tokens 1024 2>&1 | tee logs/teacher_gen.log
+TEACHER_OUT=data/teacher_sft_qwenprompts.jsonl
+if [ -s "$TEACHER_OUT" ]; then
+  echo "=== Exp 3 teacher generation: SKIP (found $(wc -l < "$TEACHER_OUT") rows in $TEACHER_OUT) ==="
+else
+  echo "=== Exp 3 teacher generation (light, run first / overnight day 0) ==="
+  python scripts/gen_teacher_data.py \
+    --config configs/config_exp1c_qwen_revkl.yaml \
+    --teacher google/gemma-4-E4B-it \
+    --out "$TEACHER_OUT" \
+    --temperature 0.7 --max-new-tokens 1024 2>&1 | tee logs/teacher_gen.log
+fi
 
 echo "=== Exp 1 C: reverse-KL PG (group_mean) training ==="
 python train_quality.py --config configs/config_exp1c_qwen_revkl.yaml  2>&1 | tee logs/exp1c_qwen.log
