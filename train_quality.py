@@ -992,6 +992,18 @@ def main():
             f"num_generations ({num_gen})"
         )
 
+    # Sequence-level (scalar-reward) path: TRL normalizes advantages internally.
+    # scale_rewards=True divides by the group std (group_std); False centers only
+    # (group_mean).
+    advantage_norm = cfg["training"].get("advantage_norm", "group_std")
+    grpo_extra = {}
+    import dataclasses as _dc
+    if "scale_rewards" in {f.name for f in _dc.fields(GRPOConfig)}:
+        grpo_extra["scale_rewards"] = advantage_norm != "group_mean"
+    elif advantage_norm == "group_mean":
+        print("[train] WARNING: installed TRL has no scale_rewards; "
+              "advantage_norm=group_mean ignored.", flush=True)
+
     grpo_cfg = GRPOConfig(
         output_dir=cfg["training"]["output_dir"],
         learning_rate=cfg["training"]["learning_rate"],
@@ -1014,6 +1026,7 @@ def main():
         gradient_checkpointing=True,
         save_total_limit=cfg["training"].get("save_total_limit", 3),
         report_to=["wandb"],
+        **grpo_extra,
     )
 
     # ── Cache eval prompts and baseline responses for LLM judge ──

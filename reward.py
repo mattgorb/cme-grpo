@@ -359,13 +359,22 @@ def build_cme_reward_fn(
     no_box_penalty: float = 5.0,
     reward_metric: str = "entropy",
     answer_weight: Optional[float] = None,
+    advantage_norm: str = "group_std",
 ):
     """Return a TRL GRPO-compatible reward function.
 
     In token-level mode, stashes per-token rewards in reward_fn.last_token_rewards
     (list of tensors, one per completion) and returns mean reward per completion
     as the scalar GRPO expects.
+
+    `advantage_norm` controls per-position group normalization of the token-level
+    rewards: "group_std" gives (r - mu_r) / (sigma_r + eps) (the default), and
+    "group_mean" gives (r - mu_r) with no divide-by-sigma.
     """
+    if advantage_norm not in ("group_std", "group_mean"):
+        raise ValueError(
+            f"advantage_norm must be 'group_std' or 'group_mean', got {advantage_norm!r}"
+        )
 
     mode = "token-level" if token_level else "sequence-level"
     if answer_weight is not None:
@@ -451,9 +460,13 @@ def build_cme_reward_fn(
             counts = mask.sum(dim=0, keepdim=True).clamp(min=1).float()
             filled = torch.where(mask, padded, torch.zeros_like(padded))
             mean = filled.sum(dim=0, keepdim=True) / counts
-            var = (torch.where(mask, (padded - mean) ** 2, torch.zeros_like(padded))).sum(dim=0, keepdim=True) / counts.clamp(min=1)
-            std = var.sqrt()
-            normalized = torch.where(mask, (padded - mean) / (std + 1e-4), torch.zeros_like(padded))
+            if advantage_norm == "group_mean":
+                # Center only — advantage = r - mu_r, no divide-by-sigma (Dr.GRPO-style).
+                normalized = torch.where(mask, (padded - mean), torch.zeros_like(padded))
+            else:
+                var = (torch.where(mask, (padded - mean) ** 2, torch.zeros_like(padded))).sum(dim=0, keepdim=True) / counts.clamp(min=1)
+                std = var.sqrt()
+                normalized = torch.where(mask, (padded - mean) / (std + 1e-4), torch.zeros_like(padded))
 
             # unpack back to original lengths
             normalized_rewards = []

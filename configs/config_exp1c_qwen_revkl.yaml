@@ -1,0 +1,57 @@
+# Rebuttal Exp 1 — Condition C: reverse-KL policy-gradient baseline (Qwen).
+# Identical to config_quality6 (the main CME-GRPO result, condition A) EXCEPT
+# advantage_norm=group_mean, which turns OFF the divide-by-sigma_r. With scalar
+# (sequence-level) rewards this makes TRL center-only (scale_rewards=False),
+# i.e. advantage = r - mu_r. That is on-policy reverse-KL PG (MiniLLM analog).
+# Everything else matches A: sequence-level CME, beta=0.01, gemma-4-E4B-it verifier.
+model:
+  generator: Qwen/Qwen2.5-0.5B-Instruct
+  verifier: google/gemma-4-E4B-it
+  base: Qwen/Qwen2.5-0.5B
+  instruct: Qwen/Qwen2.5-0.5B-Instruct
+
+data:
+  train_dataset: openbmb/UltraFeedback
+  max_train_samples: 5000
+  max_prompt_length: 512
+
+generation:
+  num_generations: 8
+  temperature: 1.0
+  max_new_tokens: 2048
+  top_p: 1.0
+
+training:
+  learning_rate: 3.0e-6
+  max_grad_norm: 1.0
+  kl_coef: 0.01            # matched to A — isolate ONLY the sigma change
+  advantage_norm: group_mean   # <-- the single variable under test
+  per_device_train_batch_size: 1
+  gradient_accumulation_steps: 8
+  num_train_epochs: 1
+  max_steps: 5000
+  warmup_steps: 20
+  logging_steps: 1
+  save_steps: 200
+  save_total_limit: 3
+  eval_steps: 200
+  skip_baseline_eval: false
+  output_dir: ./outputs/exp1c-qwen-revkl
+  bf16: true
+  seed: 42
+
+reward:
+  max_verifier_length: 2048
+  token_level: false        # reflects reality: quality path is sequence-level
+  answer_only_cme: false
+  reward_metric: entropy
+
+eval:
+  max_new_tokens: 2048
+  batch_size: 4
+  judge_model: gpt-5.2
+  judge_num_samples: 50
+
+wandb:
+  project: cme-grpo
+  run_name: exp1c-qwen-revkl

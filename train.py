@@ -198,6 +198,7 @@ def main():
     no_box_penalty = cfg.get("reward", {}).get("no_box_penalty", 5.0)
     reward_metric = cfg.get("reward", {}).get("reward_metric", "entropy")
     answer_weight = cfg.get("reward", {}).get("answer_weight", None)
+    advantage_norm = cfg["training"].get("advantage_norm", "group_std")
     reward_fn = build_cme_reward_fn(
         reward_model,
         token_level=token_level,
@@ -206,6 +207,7 @@ def main():
         no_box_penalty=no_box_penalty,
         reward_metric=reward_metric,
         answer_weight=answer_weight,
+        advantage_norm=advantage_norm,
     )
 
     train_ds = build_train_dataset(cfg, tokenizer, reward_model.tokenizer)
@@ -229,6 +231,15 @@ def main():
     grpo_kwargs = {}
     if cfg["training"].get("steps_per_generation") is not None:
         grpo_kwargs["steps_per_generation"] = cfg["training"]["steps_per_generation"]
+    # Sequence-level (scalar-reward) path: TRL normalizes advantages internally.
+    # scale_rewards=True divides by the group std (group_std); False centers only
+    # (group_mean). The token-level path handles this itself in build_cme_reward_fn.
+    import dataclasses as _dc
+    if "scale_rewards" in {f.name for f in _dc.fields(GRPOConfig)}:
+        grpo_kwargs["scale_rewards"] = advantage_norm != "group_mean"
+    elif advantage_norm == "group_mean" and not token_level:
+        print("[train] WARNING: installed TRL has no scale_rewards; "
+              "advantage_norm=group_mean ignored for sequence-level reward.", flush=True)
 
     grpo_cfg = GRPOConfig(
         output_dir=cfg["training"]["output_dir"],
