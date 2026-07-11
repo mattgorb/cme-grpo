@@ -998,8 +998,14 @@ def main():
     advantage_norm = cfg["training"].get("advantage_norm", "group_std")
     grpo_extra = {}
     import dataclasses as _dc
-    if "scale_rewards" in {f.name for f in _dc.fields(GRPOConfig)}:
-        grpo_extra["scale_rewards"] = advantage_norm != "group_mean"
+    _sr = next((f for f in _dc.fields(GRPOConfig) if f.name == "scale_rewards"), None)
+    if _sr is not None:
+        # TRL >=1.x: scale_rewards is a str ("group"=divide-by-sigma, "none"=center
+        # only). Older TRL: bool (True=divide-by-sigma). Support both.
+        if _sr.type in (bool, "bool"):
+            grpo_extra["scale_rewards"] = advantage_norm != "group_mean"
+        else:
+            grpo_extra["scale_rewards"] = "none" if advantage_norm == "group_mean" else "group"
     elif advantage_norm == "group_mean":
         print("[train] WARNING: installed TRL has no scale_rewards; "
               "advantage_norm=group_mean ignored.", flush=True)

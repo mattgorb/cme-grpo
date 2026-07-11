@@ -235,8 +235,13 @@ def main():
     # scale_rewards=True divides by the group std (group_std); False centers only
     # (group_mean). The token-level path handles this itself in build_cme_reward_fn.
     import dataclasses as _dc
-    if "scale_rewards" in {f.name for f in _dc.fields(GRPOConfig)}:
-        grpo_kwargs["scale_rewards"] = advantage_norm != "group_mean"
+    _sr = next((f for f in _dc.fields(GRPOConfig) if f.name == "scale_rewards"), None)
+    if _sr is not None:
+        # TRL >=1.x: str ("group"=divide-by-sigma, "none"=center only). Older: bool.
+        if _sr.type in (bool, "bool"):
+            grpo_kwargs["scale_rewards"] = advantage_norm != "group_mean"
+        else:
+            grpo_kwargs["scale_rewards"] = "none" if advantage_norm == "group_mean" else "group"
     elif advantage_norm == "group_mean" and not token_level:
         print("[train] WARNING: installed TRL has no scale_rewards; "
               "advantage_norm=group_mean ignored for sequence-level reward.", flush=True)
