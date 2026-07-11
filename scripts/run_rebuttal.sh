@@ -32,7 +32,7 @@ python train_quality.py --config configs/config_exp2_qwen_beta0.1.yaml 2>&1 | te
 echo "=== Exp 3 forward-KD SFT ==="
 python train_sft.py --data data/teacher_sft_qwenprompts.jsonl \
   --student Qwen/Qwen2.5-0.5B --output-dir ./outputs/exp3-sft-kd-qwen \
-  --epochs 1 --lr 1e-5 2>&1 | tee logs/exp3_sft.log
+  --epochs 1 --lr 1e-5 --max-steps 600 2>&1 | tee logs/exp3_sft.log
 
 echo "=== Exp 1 evals (reuse cached A; generate C) ==="
 # Core exhibit: A (CME group_std) vs C (reverse-KL group_mean)
