@@ -1,95 +1,119 @@
 #!/usr/bin/env bash
-# Overnight rebuttal runner (corrected plan). Run on the GPU box (L40S, 48GB).
+# Resumable rebuttal runner. Safe to re-run after any crash/quota/disconnect:
+#   * teacher-gen  : skipped if the JSONL already exists
+#   * a training run: skipped if its output dir already has a saved model
+#   * an eval      : skipped if results/<name>/summary.json already exists
+# Training failure => abort (fix, then re-run to resume). Eval failure => warn &
+# continue (re-run later to retry) so a bad eval never discards trained models.
 #
-# Conditions reflect what the code ACTUALLY does:
-#   * open-ended CME is SEQUENCE-level (train_quality.build_quality_reward_fn),
-#   * condition A used beta=0.01 and verifier gemma-4-E4B-it (config_quality6/8),
-#   * condition A weights aren't saved, but A's greedy generations ARE cached and
-#     are reused for judging (no A re-run needed).
-#
-# Set these to where A's cached eval lives on THIS machine before running:
-A_QWEN=${A_QWEN:-/path/to/cme-grpo-quality-config6/quality_eval}   # has finetuned_outputs.json, base_outputs.json, instruct_outputs.json
+# Set these to where condition-A's cached generations live, then run in tmux:
+A_QWEN=${A_QWEN:-/path/to/cme-grpo-quality-config6/quality_eval}
 A_LLAMA=${A_LLAMA:-/path/to/cme-grpo-quality-config8/quality_eval}
 JUDGES=${JUDGES:-gpt-5.2,claude-sonnet-4-6}
-set -euo pipefail
+
+set -uo pipefail   # NOT -e: per-step handling below decides what aborts
 mkdir -p results logs data
 
+# ---- helpers ---------------------------------------------------------------
+trained () { [ -f "$1/config.json" ] || [ -f "$1/.done" ]; }   # $1 = output dir
+
+train () {   # $1=config  $2=logfile  $3=output_dir
+  if trained "$3"; then echo ">> SKIP train (already done): $3"; return 0; fi
+  echo ">> TRAIN: $1  ->  $3"
+  if python train_quality.py --config "$1" 2>&1 | tee "$2"; then
+    touch "$3/.done"
+  else
+    echo "!! TRAIN FAILED: $1  — fix the cause, then re-run this script to resume."
+    exit 1
+  fi
+}
+
+evaled () { [ -f "results/$1/summary.json" ]; }   # $1 = result name
+
+h2h () {     # $1=name  rest=eval_head2head args (out-dir/judges added here)
+  local name="$1"; shift
+  if evaled "$name"; then echo ">> SKIP eval (already done): results/$name"; return 0; fi
+  echo ">> EVAL: $name"
+  python eval_head2head.py "$@" --judges "$JUDGES" --out-dir "results/$name" \
+    || echo "!! EVAL FAILED: $name — continuing; re-run script to retry."
+}
+
+# ---- Exp 3 teacher generation (skip if present) ----------------------------
 TEACHER_OUT=data/teacher_sft_qwenprompts.jsonl
 if [ -s "$TEACHER_OUT" ]; then
-  echo "=== Exp 3 teacher generation: SKIP (found $(wc -l < "$TEACHER_OUT") rows in $TEACHER_OUT) ==="
+  echo ">> SKIP teacher-gen (found $(wc -l < "$TEACHER_OUT") rows)"
 else
-  echo "=== Exp 3 teacher generation (light, run first / overnight day 0) ==="
+  echo ">> TEACHER GEN"
   python scripts/gen_teacher_data.py \
     --config configs/config_exp1c_qwen_revkl.yaml \
-    --teacher google/gemma-4-E4B-it \
-    --out "$TEACHER_OUT" \
+    --teacher google/gemma-4-E4B-it --out "$TEACHER_OUT" \
     --temperature 0.7 --max-new-tokens 1024 2>&1 | tee logs/teacher_gen.log
 fi
 
-echo "=== Exp 1 C: reverse-KL PG (group_mean) training ==="
-python train_quality.py --config configs/config_exp1c_qwen_revkl.yaml  2>&1 | tee logs/exp1c_qwen.log
-python train_quality.py --config configs/config_exp1c_llama_revkl.yaml 2>&1 | tee logs/exp1c_llama.log
+# ---- Exp 1C: reverse-KL (group_mean) + interleaved evals -------------------
+train configs/config_exp1c_qwen_revkl.yaml  logs/exp1c_qwen.log  outputs/exp1c-qwen-revkl
+h2h exp1_qwen_AvsC   --outputs-a "$A_QWEN/finetuned_outputs.json" --label-a CME_group_std \
+                     --model-b outputs/exp1c-qwen-revkl           --label-b revKL_group_mean
+h2h exp1_qwen_Cvsbase --model-a outputs/exp1c-qwen-revkl --label-a revKL \
+                      --outputs-b "$A_QWEN/base_outputs.json"     --label-b base
 
-echo "=== Exp 2 beta sweep training (Qwen) ==="
-python train_quality.py --config configs/config_exp2_qwen_beta0.yaml   2>&1 | tee logs/exp2_beta0.log
-python train_quality.py --config configs/config_exp2_qwen_beta0.1.yaml 2>&1 | tee logs/exp2_beta01.log
+train configs/config_exp1c_llama_revkl.yaml logs/exp1c_llama.log outputs/exp1c-llama-revkl
+if [ -s "$A_LLAMA/finetuned_outputs.json" ]; then
+  h2h exp1_llama_AvsC --outputs-a "$A_LLAMA/finetuned_outputs.json" --label-a CME_group_std \
+                      --model-b outputs/exp1c-llama-revkl           --label-b revKL_group_mean
+else
+  echo ">> SKIP exp1_llama_AvsC: A_LLAMA/finetuned_outputs.json missing/empty (Llama A not recoverable)"
+fi
+# base generated fresh (cached llama base may be empty), so this is robust:
+h2h exp1_llama_Cvsbase --model-a outputs/exp1c-llama-revkl --label-a revKL \
+                       --model-b meta-llama/Llama-3.2-1B  --label-b base
 
-echo "=== Exp 3 forward-KD SFT ==="
-python train_sft.py --data data/teacher_sft_qwenprompts.jsonl \
-  --student Qwen/Qwen2.5-0.5B --output-dir ./outputs/exp3-sft-kd-qwen \
-  --epochs 1 --lr 1e-5 --max-steps 600 2>&1 | tee logs/exp3_sft.log
+# ---- Exp 2: beta sweep (each vs A=beta0.01) --------------------------------
+train configs/config_exp2_qwen_beta0.yaml   logs/exp2_beta0.log  outputs/exp2-qwen-beta0
+h2h exp2_beta0_vs_A  --outputs-a "$A_QWEN/finetuned_outputs.json" --label-a beta0.01 \
+                     --model-b outputs/exp2-qwen-beta0            --label-b beta0
 
-echo "=== Exp 1 evals (reuse cached A; generate C) ==="
-# Core exhibit: A (CME group_std) vs C (reverse-KL group_mean)
-python eval_head2head.py \
-  --outputs-a "$A_QWEN/finetuned_outputs.json"     --label-a CME_group_std \
-  --model-b ./outputs/exp1c-qwen-revkl             --label-b revKL_group_mean \
-  --judges "$JUDGES" --out-dir results/exp1_qwen_AvsC 2>&1 | tee logs/eval_exp1_qwen_AvsC.log
-# C vs base (reuse cached base outputs)
-python eval_head2head.py \
-  --model-a ./outputs/exp1c-qwen-revkl --label-a revKL \
-  --outputs-b "$A_QWEN/base_outputs.json" --label-b base \
-  --judges "$JUDGES" --out-dir results/exp1_qwen_Cvsbase 2>&1 | tee logs/eval_exp1_qwen_Cvsbase.log
-# Llama A vs C
-python eval_head2head.py \
-  --outputs-a "$A_LLAMA/finetuned_outputs.json" --label-a CME_group_std \
-  --model-b ./outputs/exp1c-llama-revkl         --label-b revKL_group_mean \
-  --judges "$JUDGES" --out-dir results/exp1_llama_AvsC 2>&1 | tee logs/eval_exp1_llama_AvsC.log
+train configs/config_exp2_qwen_beta0.1.yaml logs/exp2_beta01.log outputs/exp2-qwen-beta0.1
+h2h exp2_beta01_vs_A --outputs-a "$A_QWEN/finetuned_outputs.json" --label-a beta0.01 \
+                     --model-b outputs/exp2-qwen-beta0.1          --label-b beta0.1
 
-echo "=== Exp 2 evals (each beta vs A=beta0.01 and vs base) ==="
-python eval_head2head.py \
-  --outputs-a "$A_QWEN/finetuned_outputs.json" --label-a beta0.01 \
-  --model-b ./outputs/exp2-qwen-beta0 --label-b beta0 \
-  --judges "$JUDGES" --out-dir results/exp2_beta0_vs_A 2>&1 | tee logs/eval_exp2_beta0.log
-python eval_head2head.py \
-  --outputs-a "$A_QWEN/finetuned_outputs.json" --label-a beta0.01 \
-  --model-b ./outputs/exp2-qwen-beta0.1 --label-b beta0.1 \
-  --judges "$JUDGES" --out-dir results/exp2_beta01_vs_A 2>&1 | tee logs/eval_exp2_beta01.log
+# ---- Exp 3: forward-KD SFT + evals -----------------------------------------
+if trained outputs/exp3-sft-kd-qwen; then
+  echo ">> SKIP train (already done): outputs/exp3-sft-kd-qwen"
+else
+  echo ">> TRAIN SFT -> outputs/exp3-sft-kd-qwen"
+  if python train_sft.py --data "$TEACHER_OUT" --student Qwen/Qwen2.5-0.5B \
+       --output-dir outputs/exp3-sft-kd-qwen --epochs 1 --lr 1e-5 --max-steps 600 \
+       2>&1 | tee logs/exp3_sft.log; then
+    touch outputs/exp3-sft-kd-qwen/.done
+  else
+    echo "!! SFT FAILED — fix and re-run to resume."; exit 1
+  fi
+fi
+h2h exp3_kd_vs_base --model-a outputs/exp3-sft-kd-qwen --label-a SFT_forwardKD \
+                    --outputs-b "$A_QWEN/base_outputs.json" --label-b base
+h2h exp3_kd_vs_A    --model-a outputs/exp3-sft-kd-qwen --label-a SFT_forwardKD \
+                    --outputs-b "$A_QWEN/finetuned_outputs.json" --label-b CME_group_std
 
-echo "=== Exp 3 eval (SFT-KD vs base, vs A) ==="
-python eval_head2head.py \
-  --model-a ./outputs/exp3-sft-kd-qwen --label-a SFT_forwardKD \
-  --outputs-b "$A_QWEN/base_outputs.json" --label-b base \
-  --judges "$JUDGES" --out-dir results/exp3_kd_vs_base 2>&1 | tee logs/eval_exp3_kd_base.log
-python eval_head2head.py \
-  --model-a ./outputs/exp3-sft-kd-qwen --label-a SFT_forwardKD \
-  --outputs-b "$A_QWEN/finetuned_outputs.json" --label-b CME_group_std \
-  --judges "$JUDGES" --out-dir results/exp3_kd_vs_A 2>&1 | tee logs/eval_exp3_kd_A.log
+# ---- Exp 4: teacher-on-AlpacaEval gen (for drift) + drift metrics ----------
+h2h teacher_gen --model-a google/gemma-4-E4B-it --label-a teacher \
+                --outputs-b "$A_QWEN/finetuned_outputs.json" --label-b CME_group_std
 
-echo "=== Exp 4 drift metrics (CPU) ==="
-# Teacher's own generations on the SAME prompt set as A, for teacher-similarity.
-python eval_head2head.py \
-  --model-a google/gemma-4-E4B-it --label-a teacher \
-  --outputs-b "$A_QWEN/finetuned_outputs.json" --label-b CME_group_std \
-  --judges "$JUDGES" --out-dir results/teacher_gen 2>&1 | tee logs/teacher_on_alpaca.log || true
-python scripts/drift_metrics.py \
-  --cond A_group_std="$A_QWEN/finetuned_outputs.json" \
-  --cond C_group_mean=results/exp1_qwen_AvsC/revKL_group_mean_outputs.json \
-  --cond beta0=results/exp2_beta0_vs_A/beta0_outputs.json \
-  --cond beta0.1=results/exp2_beta01_vs_A/beta0.1_outputs.json \
-  --cond SFT_KD=results/exp3_kd_vs_base/SFT_forwardKD_outputs.json \
-  --teacher-outputs results/teacher_gen/teacher_outputs.json \
-  --tokenizer Qwen/Qwen2.5-0.5B \
-  --out results/drift/qwen_drift.json 2>&1 | tee logs/drift.log
+if [ -f results/drift/qwen_drift.json ]; then
+  echo ">> SKIP drift (results/drift/qwen_drift.json exists)"
+else
+  echo ">> DRIFT metrics"
+  python scripts/drift_metrics.py \
+    --cond A_group_std="$A_QWEN/finetuned_outputs.json" \
+    --cond C_group_mean=results/exp1_qwen_AvsC/revKL_group_mean_outputs.json \
+    --cond beta0=results/exp2_beta0_vs_A/beta0_outputs.json \
+    --cond beta0.1=results/exp2_beta01_vs_A/beta0.1_outputs.json \
+    --cond SFT_KD=results/exp3_kd_vs_base/SFT_forwardKD_outputs.json \
+    --teacher-outputs results/teacher_gen/teacher_outputs.json \
+    --tokenizer Qwen/Qwen2.5-0.5B \
+    --out results/drift/qwen_drift.json 2>&1 | tee logs/drift.log \
+    || echo "!! drift failed — continuing."
+fi
 
 echo "=== DONE. Headline: results/exp1_qwen_AvsC/summary.json ==="
+echo "=== Re-run this script any time; completed steps are skipped. ==="
