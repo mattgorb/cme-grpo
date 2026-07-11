@@ -23,9 +23,15 @@ import json
 import os
 import time
 
+import sys
+
 import torch
 import yaml
 from transformers import AutoModelForCausalLM, AutoTokenizer
+
+# Allow running as `python scripts/gen_teacher_data.py` from the repo root:
+# put the repo root (parent of scripts/) on the path so repo modules import.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Reuse the EXACT training-prompt selection so KD prompts == GRPO prompts.
 from train_quality import build_train_dataset
