@@ -44,6 +44,23 @@ python scripts/drift_metrics.py \
   --teacher-outputs results/drift/teacher_outputs.json \
   --tokenizer Qwen/Qwen2.5-0.5B --out results/drift/decisive.json 2>&1 | tee logs/drift_decisive.log
 
+# --- WIN RATES (needs API keys). Reuses the already-generated outputs -> judge-only,
+# no regeneration. Confirms the diverse model (group_std) is also the BETTER one. ---
+JUDGES=${JUDGES:-gpt-5.2,claude-sonnet-4-6}
+wr () {  # $1=name $2=outfile_a $3=outfile_b $4=label_a $5=label_b
+  if [ -f "results/$1/summary.json" ]; then echo ">> SKIP wr (done): $1"; return 0; fi
+  python eval_head2head.py --outputs-a "$2" --label-a "$4" --outputs-b "$3" --label-b "$5" \
+    --judges "$JUDGES" --out-dir "results/$1" || echo "!! wr $1 failed — continuing."
+}
+if [ -n "${OPENAI_API_KEY:-}" ] || [ -n "${ANTHROPIC_API_KEY:-}" ]; then
+  echo ">> WIN RATES (judge)"
+  wr drift_std_vs_base  results/drift/groupstd_outputs.json  results/drift/base_outputs.json      group_std group_mean_base
+  wr drift_mean_vs_base results/drift/groupmean_outputs.json results/drift/base_outputs.json      group_mean base
+  wr drift_std_vs_mean  results/drift/groupstd_outputs.json  results/drift/groupmean_outputs.json group_std group_mean
+else
+  echo ">> SKIP win rates: no OPENAI_API_KEY/ANTHROPIC_API_KEY set (drift is done; export keys and re-run to add win rates)"
+fi
+
 echo "=================================================================="
 echo " DECISIVE NUMBERS:"; cat results/drift/decisive.json
 echo "=================================================================="
