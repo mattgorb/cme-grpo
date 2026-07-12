@@ -1,0 +1,47 @@
+# Dense-vs-Scalar-vs-ReverseKL experiment — meta-llama/Llama-3.2-1B-Instruct, arm=dense
+model:
+  generator: meta-llama/Llama-3.2-1B-Instruct
+  verifier: google/gemma-4-E4B-it
+  base: meta-llama/Llama-3.2-1B
+  instruct: meta-llama/Llama-3.2-1B-Instruct
+data:
+  train_dataset: openbmb/UltraFeedback
+  max_train_samples: 5000
+  max_prompt_length: 512
+generation:
+  num_generations: 8
+  temperature: 1.0
+  max_new_tokens: 1024
+  top_p: 1.0
+training:
+  learning_rate: 3.0e-6
+  max_grad_norm: 1.0
+  kl_coef: 0.0
+  advantage_norm: group_std
+  per_device_train_batch_size: 1
+  gradient_accumulation_steps: 8
+  num_train_epochs: 1
+  max_steps: 400
+  warmup_steps: 20
+  logging_steps: 1
+  save_steps: 200
+  save_total_limit: 3
+  eval_steps: 100000
+  skip_baseline_eval: true
+  output_dir: ./outputs/dsr-llamait-dense
+  bf16: true
+  seed: 42
+reward:
+  max_verifier_length: 1024
+  token_level: true
+  reverse_kl: false
+  answer_only_cme: false
+  reward_metric: entropy
+eval:
+  max_new_tokens: 1024
+  batch_size: 4
+  judge_model: gpt-5.2
+  judge_num_samples: 50
+wandb:
+  project: cme-grpo
+  run_name: dsr-llamait-dense

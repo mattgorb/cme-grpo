@@ -37,6 +37,8 @@ from transformers import (
 )
 from trl import GRPOConfig, GRPOTrainer
 
+from cme_trainer import CMETokenLevelGRPOTrainer
+
 from reward import CMERewardModel
 
 
@@ -176,12 +178,25 @@ def build_rent_reward_fn(model, tokenizer, max_length: int = 2048):
     return reward_fn
 
 
-def build_quality_reward_fn(reward_model: CMERewardModel, reward_metric: str = "entropy"):
-    """TRL-compatible reward function using sequence-level CME for open-ended tasks.
+def build_quality_reward_fn(
+    reward_model: CMERewardModel,
+    reward_metric: str = "entropy",
+    token_level: bool = False,
+    gen_tokenizer=None,
+    advantage_norm: str = "group_std",
+):
+    """TRL-compatible CME reward function for open-ended tasks.
 
-    No answer extraction or correctness checking — just how surprised the verifier
-    is by the generator's response (lower surprise = higher reward).
+    token_level=False: sequence-level scalar CME (mean verifier surprise over the
+      response).
+    token_level=True: DENSE per-token CME with character-level alignment between
+      the generator and verifier tokenizers (the paper's method). Per-token rewards
+      are group-normalized per position and stashed for CMETokenLevelGRPOTrainer;
+      the scalar mean is returned to TRL. `advantage_norm` selects group_std
+      (divide by sigma) or group_mean (center only).
     """
+    if advantage_norm not in ("group_std", "group_mean"):
+        raise ValueError(f"advantage_norm must be group_std|group_mean, got {advantage_norm!r}")
     _call_count = [0]
 
     def reward_fn(prompts, completions, **kwargs) -> List[float]:
@@ -212,17 +227,117 @@ def build_quality_reward_fn(reward_model: CMERewardModel, reward_metric: str = "
             print(f"  completion[0][:200]: {repr(completion_texts[0][:200])}")
             _call_count[0] += 1
 
-        rewards = reward_model.score(
+        raw = reward_model.score(
             prompt_texts, completion_texts,
-            token_level=False, answer_only=False,
-            no_box_penalty=0.0,
+            token_level=token_level, answer_only=False,
+            no_box_penalty=0.0,               # open-ended: no boxed-answer penalty
             reward_metric=reward_metric,
+            gen_tokenizer=gen_tokenizer if token_level else None,
         )
 
-        if _call_count[0] <= 3:
-            print(f"  rewards: {[f'{r:.4f}' for r in rewards]}")
-            print(f"  mean={sum(rewards)/len(rewards):.4f} std={torch.tensor(rewards).std().item():.4f}")
+        if not token_level:
+            if _call_count[0] <= 3:
+                print(f"  rewards: {[f'{r:.4f}' for r in raw]}  mean={sum(raw)/len(raw):.4f}")
+            return raw
 
+        # --- DENSE (token-level): per-position group-normalize + stash ---
+        token_rewards, scalar_rewards, keys = [], [], []
+        for c, r in zip(completion_texts, raw):
+            t = torch.tensor([r]) if isinstance(r, float) else r
+            token_rewards.append(t)
+            scalar_rewards.append(float(t.mean().item()))
+            keys.append(c)
+        max_len = max(t.numel() for t in token_rewards)
+        padded = torch.stack([
+            torch.nn.functional.pad(t, (0, max_len - t.numel()), value=float("nan"))
+            for t in token_rewards
+        ])
+        mask = ~torch.isnan(padded)
+        counts = mask.sum(dim=0, keepdim=True).clamp(min=1).float()
+        filled = torch.where(mask, padded, torch.zeros_like(padded))
+        mean = filled.sum(dim=0, keepdim=True) / counts
+        if advantage_norm == "group_mean":
+            normalized = torch.where(mask, padded - mean, torch.zeros_like(padded))
+        else:
+            var = torch.where(mask, (padded - mean) ** 2, torch.zeros_like(padded)).sum(dim=0, keepdim=True) / counts.clamp(min=1)
+            std = var.sqrt()
+            normalized = torch.where(mask, (padded - mean) / (std + 1e-4), torch.zeros_like(padded))
+        normalized_rewards = [normalized[i, : t.numel()].clone() for i, t in enumerate(token_rewards)]
+        reward_fn.last_token_rewards = normalized_rewards
+        reward_fn.completion_to_tokens = dict(zip(keys, normalized_rewards))
+        if _call_count[0] <= 3:
+            print(f"  [token-level] scalar means: {[f'{s:.4f}' for s in scalar_rewards]}")
+        return scalar_rewards
+
+    reward_fn.token_level = token_level
+    reward_fn.last_token_rewards = None
+    return reward_fn
+
+
+def _mean_policy_logprob(model, tokenizer, prompts, completions, max_length: int = 2048) -> List[float]:
+    """Mean log pi(y_t) of each completion under the current policy (one fwd each)."""
+    model.eval()
+    device = next(model.parameters()).device
+    out: List[float] = []
+    for p, c in zip(prompts, completions):
+        p_ids = tokenizer(p, add_special_tokens=False)["input_ids"]
+        c_ids = tokenizer(c, add_special_tokens=False)["input_ids"]
+        if len(c_ids) == 0:
+            out.append(0.0)
+            continue
+        ids = (p_ids + c_ids)[:max_length]
+        n_c = max(len(ids) - len(p_ids), 0)
+        if n_c == 0:
+            out.append(0.0)
+            continue
+        input_ids = torch.tensor([ids], device=device)
+        with torch.no_grad():
+            logits = model(input_ids=input_ids).logits[:, :-1, :]
+            logp = torch.log_softmax(logits.float(), dim=-1)
+            targets = input_ids[:, 1:]
+            tok_logp = logp.gather(-1, targets.unsqueeze(-1)).squeeze(-1)[0]
+        comp_logp = tok_logp[-n_c:]
+        out.append(float(comp_logp.mean().item()))
+    return out
+
+
+def build_reverse_kl_reward_fn(reward_model, policy_model, gen_tokenizer,
+                               reward_metric: str = "entropy", max_length: int = 2048):
+    """On-policy reverse-KL PG baseline: R(y) = mean_t log q(y_t) - mean_t log pi(y_t).
+
+    log q = frozen verifier (the CME term); log pi = current policy (the entropy /
+    self-referential term that CME drops). Sequence-level scalar reward -> plain
+    GRPOTrainer. This is the distillation baseline that adds back the term CME omits.
+    """
+    _cc = [0]
+
+    def reward_fn(prompts, completions, **kwargs) -> List[float]:
+        prompt_texts, completion_texts = [], []
+        for p, c in zip(prompts, completions):
+            if isinstance(p, list):
+                p = "\n".join(m.get("content", "") for m in p)
+            if isinstance(c, list):
+                c = "\n".join(m.get("content", "") for m in c)
+            prompt_texts.append(p)
+            completion_texts.append(c)
+        instructions = kwargs.get("instruction")
+        ver_prompts = (
+            [_format_prompt_for_quality_verifier(i, reward_model.tokenizer) for i in instructions]
+            if instructions is not None else prompt_texts
+        )
+        gen_prompts = (
+            [format_prompt(i, gen_tokenizer) for i in instructions]
+            if instructions is not None else prompt_texts
+        )
+        logq = reward_model.score(
+            ver_prompts, completion_texts, token_level=False, answer_only=False,
+            no_box_penalty=0.0, reward_metric=reward_metric,
+        )  # = mean log q (reward: higher = verifier likes it)
+        logpi = _mean_policy_logprob(policy_model, gen_tokenizer, gen_prompts, completion_texts, max_length)
+        rewards = [float(lq - lp) for lq, lp in zip(logq, logpi)]
+        if _cc[0] <= 3:
+            _cc[0] += 1
+            print(f"  [reverse-KL] logq={[f'{x:.2f}' for x in logq]} logpi={[f'{x:.2f}' for x in logpi]}")
         return rewards
 
     reward_fn.token_level = False
@@ -973,7 +1088,19 @@ def main():
             device=verifier_device,
             max_length=cfg["reward"]["max_verifier_length"],
         )
-        reward_fn = build_quality_reward_fn(reward_model, reward_metric=reward_metric)
+        if cfg.get("reward", {}).get("reverse_kl", False):
+            reward_fn = build_reverse_kl_reward_fn(
+                reward_model, model, tokenizer,
+                reward_metric=reward_metric,
+                max_length=cfg["reward"].get("max_verifier_length", 2048),
+            )
+        else:
+            reward_fn = build_quality_reward_fn(
+                reward_model, reward_metric=reward_metric,
+                token_level=cfg.get("reward", {}).get("token_level", False),
+                gen_tokenizer=(tokenizer if cfg.get("reward", {}).get("token_level", False) else None),
+                advantage_norm=cfg["training"].get("advantage_norm", "group_std"),
+            )
 
     train_ds = build_train_dataset(cfg, tokenizer)
 
@@ -1144,7 +1271,8 @@ def main():
         instruct_responses=instruct_responses,
     )
 
-    trainer = GRPOTrainer(
+    TrainerCls = CMETokenLevelGRPOTrainer if getattr(reward_fn, "token_level", False) else GRPOTrainer
+    trainer = TrainerCls(
         model=model,
         processing_class=tokenizer,
         reward_funcs=reward_fn,
