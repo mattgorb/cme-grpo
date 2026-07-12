@@ -14,7 +14,7 @@ generation:
   max_new_tokens: 1024
   top_p: 1.0
 training:
-  learning_rate: 3.0e-6
+  learning_rate: 1.0e-5
   max_grad_norm: 1.0
   kl_coef: 0.0
   advantage_norm: group_std
