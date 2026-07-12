@@ -19,6 +19,9 @@ trained () { [ -f "$1/config.json" ] || [ -f "$1/.done" ]; }   # $1 = output dir
 
 train () {   # $1=config  $2=logfile  $3=output_dir
   if trained "$3"; then echo ">> SKIP train (already done): $3"; return 0; fi
+  # Not done -> start FRESH. Clear any partial/corrupt checkpoints, else
+  # train_quality.py auto-resumes from an incomplete checkpoint and crashes.
+  rm -rf "$3"
   echo ">> TRAIN: $1  ->  $3"
   if python train_quality.py --config "$1" 2>&1 | tee "$2"; then
     touch "$3/.done"
@@ -81,6 +84,7 @@ h2h exp2_beta01_vs_A --outputs-a "$A_QWEN/finetuned_outputs.json" --label-a beta
 if trained outputs/exp3-sft-kd-qwen; then
   echo ">> SKIP train (already done): outputs/exp3-sft-kd-qwen"
 else
+  rm -rf outputs/exp3-sft-kd-qwen
   echo ">> TRAIN SFT -> outputs/exp3-sft-kd-qwen"
   if python train_sft.py --data "$TEACHER_OUT" --student Qwen/Qwen2.5-0.5B \
        --output-dir outputs/exp3-sft-kd-qwen --epochs 1 --lr 1e-5 --max-steps 600 \
