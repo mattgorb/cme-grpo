@@ -1019,6 +1019,7 @@ def main():
         max_steps=cfg["training"]["max_steps"],
         warmup_steps=cfg["training"]["warmup_steps"],
         logging_steps=cfg["training"]["logging_steps"],
+        save_strategy="steps",   # transformers 5.x defaults to "no" -> save_steps ignored
         save_steps=cfg["training"]["save_steps"],
         bf16=cfg["training"]["bf16"],
         seed=cfg["training"]["seed"],
