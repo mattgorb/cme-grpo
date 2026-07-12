@@ -1,0 +1,56 @@
+# DECISIVE drift run — group_std on a PRETRAINED base (Qwen2.5-0.5B).
+# Matched partner of config_drift_qwenbase_groupmean.yaml: identical except
+# advantage_norm. Short + capped for speed; mid-training judge evals OFF (the
+# decisive metric is drift, computed on CPU with no API). This is the run that
+# tests whether group_std mitigates the entropy-drop collapse.
+model:
+  generator: Qwen/Qwen2.5-0.5B
+  verifier: google/gemma-4-E4B-it
+  base: Qwen/Qwen2.5-0.5B
+  instruct: Qwen/Qwen2.5-0.5B-Instruct
+
+data:
+  train_dataset: openbmb/UltraFeedback
+  max_train_samples: 5000
+  max_prompt_length: 512
+
+generation:
+  num_generations: 8
+  temperature: 1.0
+  max_new_tokens: 1024      # capped (both conditions equal) -> faster, still fair
+  top_p: 1.0
+
+training:
+  learning_rate: 3.0e-6
+  max_grad_norm: 1.0
+  kl_coef: 0.0              # beta=0 so the ONLY stabilizer under test is group-norm
+  advantage_norm: group_std
+  per_device_train_batch_size: 1
+  gradient_accumulation_steps: 8
+  num_train_epochs: 1
+  max_steps: 400
+  warmup_steps: 20
+  logging_steps: 1
+  save_steps: 400
+  save_total_limit: 1
+  eval_steps: 100000         # > max_steps => in-training judge eval never fires
+  skip_baseline_eval: true
+  output_dir: ./outputs/drift-qwenbase-groupstd
+  bf16: true
+  seed: 42
+
+reward:
+  max_verifier_length: 1024
+  token_level: false
+  answer_only_cme: false
+  reward_metric: entropy
+
+eval:
+  max_new_tokens: 1024
+  batch_size: 4
+  judge_model: gpt-5.2
+  judge_num_samples: 50
+
+wandb:
+  project: cme-grpo
+  run_name: drift-qwenbase-groupstd
